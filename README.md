@@ -166,16 +166,6 @@ correct second-precision integers regardless of the underlying precision.
 
 ---
 
-## About the Data
-
-Provided as part of a project developed with **CBS — Statistics Netherlands**.
-The house is a real single-family, gas-heated home in Nordwijk, NL; all personal
-identifiers removed. CBS is the Dutch national statistical office. It operates in a
-market-oriented mode — open data APIs, commercial partnerships, and statistics that
-directly inform policy including the *Klimaatakkoord* (Dutch Climate Agreement).
-This project's methodology is designed to be scalable to the ~8 million
-owner-occupied homes in the Netherlands that now carry a legally mandated smart meter.
-
 ---
 
 ---
@@ -184,7 +174,7 @@ owner-occupied homes in the Netherlands that now carry a legally mandated smart 
 
 ## 项目简介
 
-本项目基于荷兰 Nordwijk 一户真实家庭的智能家居数据，数据跨度 32 个月（2022 年 3 月至 2025 年 3 月），由本项目与**荷兰统计局（CBS）**合作收集。
+本项目基于荷兰 Nordwijk 一户真实家庭的智能家居数据，数据跨度 32 个月（2022 年 3 月至 2025 年 3 月），由本项目与荷兰统计局（CBS）合作收集。
 
 数据来源包括：P1 智能电表（电力 + 燃气，15 分钟分辨率）、约 40 个 SmartThings 智能家居设备（运动传感器、温度传感器、门磁、智能插座等），以及 Open-Meteo 提供的历史气象数据。
 
@@ -210,15 +200,15 @@ owner-occupied homes in the Netherlands that now carry a legally mandated smart 
 - **语言：** Python 3.13
 - **数据处理：** pandas 3.0、SQLAlchemy 2.0
 - **CLI 工具：** Click
-- **可视化：** Matplotlib、Plotly Dash
+- **可视化：** Matplotlib
 - **数据库：** SQLite
 - **版本控制：** Git
 
 ---
 
-## 已完成的分析
+## 分析
 
-### `report_data_quality.ipynb` ✅ 数据质量审计
+### `report_data_quality.ipynb` 数据质量审计
 
 对四个数据源进行全面质量检验，主要发现：
 
@@ -228,13 +218,13 @@ owner-occupied homes in the Netherlands that now carry a legally mandated smart 
 - **气象数据**：ERA5 再分析数据完整无缺口，温度范围（−5.6°C 至 35.7°C）与 2022–2023 年欧洲热浪记录一致
 - 报告末尾给出结构化质量评分卡和后续分析路线图
 
-### 后续分析（进行中 / 计划中）
+### 确认好后会更新
 
 | 报告 | 方法 | 状态 |
 |------|------|------|
-| 能耗时间模式 | 时间序列分解、日/周热力图 | 进行中 |
-| 温度-燃气回归 | OLS 回归、残差诊断、供暖度日模型 | 计划中 |
-| 在家/不在家检测 | 运动传感器聚类（K-means / DBSCAN） | 计划中 |
+| 能耗时间模式 | 时间序列分解、日/周热力图 |
+| 温度-燃气回归 | OLS 回归、残差诊断、供暖度日模型 | 
+| 在家/不在家检测 | 运动传感器聚类（K-means / DBSCAN） | 
 
 ---
 
