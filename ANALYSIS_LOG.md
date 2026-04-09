@@ -1,179 +1,106 @@
-# Analysis Log — SmartHomeEnergyAnalysis
+# 分析日志 — SmartHomeEnergyAnalysis
 
-> **Purpose:** This log records analytical decisions, bugs encountered, surprising findings,
-> open questions, and reflections throughout the project. It is a thinking record, not a
-> summary of results. Entries are dated and honest — including failures and reversals.
->
-> **Audience:** Future self, interviewers, collaborators.
+> **用途：** 记录分析过程中的决策、踩过的坑、意外发现和开放性问题。这是一份思考记录，不是结果总结。包括失败和反转都会如实写进来。
 
 ---
 
-## Phase 1 — ETL Pipeline (2026-04-10)
+## 第一阶段 — ETL 管道
 
-### Decision: Epoch storage format
-**Decision:** Store all timestamps as UTC Unix epoch integers (seconds).
-**Why:** Avoids timezone ambiguity at query time. Timezone conversion is done once at
-ingestion, consistently, rather than scattered across every downstream analysis.
-**Trade-off:** Slightly less readable in raw SQL queries. Mitigated by `epoch_to_amsterdam()`
-utility function in `home_messages_db.py`.
+### 决策：时间戳统一存为 UTC epoch 整数
+所有时间在入库前一律转为 UTC Unix 秒整数。好处是查询时不用再处理时区，转换逻辑集中在 ETL 层做一次。代价是 SQL 里直接看数字不直观，用 `epoch_to_amsterdam()` 工具函数弥补。
 
 ---
 
-### Bug: pandas 3.0 datetime precision change
-**What happened:** All stored epochs were ~1000x too small (e.g. 1,647,609 instead of
-1,669,849,200), causing all timestamps to appear as "1970-01-20".
-**Root cause:** In pandas 3.0, the default datetime precision changed from `datetime64[ns]`
-(nanoseconds) to `datetime64[us]` (microseconds). The conversion chain
-`.astype("int64") // 10**9` had assumed nanoseconds — dividing microseconds by 10^9
-gives milliseconds, not seconds.
-**Fix:** Added `.dt.tz_localize(None).astype("datetime64[s]").astype("int64")` — casting
-to second-precision first makes the final integer always represent seconds, regardless of
-the underlying pandas precision.
-**Lesson:** Never assume the internal precision of a pandas datetime. Always cast to an
-explicit target precision before converting to integer.
+### Bug：pandas 3.0 datetime 精度变化（严重）
+**现象：** 所有存入的 epoch 约为正确值的 1/1000，导致时间戳显示成"1970-01-20"。
+
+**根因：** pandas 3.0 把默认 datetime 精度从 `datetime64[ns]`（纳秒）改成了 `datetime64[us]`（微秒）。原来的 `.astype("int64") // 10**9` 假设的是纳秒，现在除以 10⁹ 实际上得到了毫秒级结果，差了 1000 倍。
+
+**修复：** 改成 `.dt.tz_localize(None).astype("datetime64[s]").astype("int64")`——先把 datetime 精度锁定到秒，再转整数，不管底层是纳秒还是微秒都能正确输出秒。
+
+**教训：** 不要假设 pandas datetime 的内部精度。永远显式指定目标精度再做整数转换。
 
 ---
 
-### Decision: DST handling strategy
-**What happened:** `openweathermap.py` crashed on 2022-10-30 (DST fall-back in Amsterdam)
-because `ambiguous='infer'` cannot resolve ambiguous hourly timestamps — only sub-hourly
-data has enough context for inference.
-**Fix:** Requested UTC directly from the Open-Meteo API (`timezone=UTC`). No DST
-ambiguity possible in UTC.
-**Lesson:** Applied a hierarchy of DST strategies:
-1. Get UTC from source if possible (best — zero DST exposure)
-2. Use `ambiguous='infer'` for sub-hourly data (pandas can infer direction from neighbors)
-3. Explicit `True/False` only when the transition direction is known from domain knowledge
+### Bug：DST 夏令时处理崩溃
+**现象：** `openweathermap.py` 在处理 2022-10-30（荷兰夏令时结束，时钟拨回）时崩溃，`ambiguous='infer'` 对逐小时数据无法判断方向。
+
+**修复：** 直接向 Open-Meteo API 请求 UTC 时间（`timezone=UTC`），从根源消除 DST 歧义。
+
+**总结出的 DST 处理层级：**
+1. 能从数据源直接拿 UTC 就拿 UTC（最优，零 DST 风险）
+2. 数据频率 ≤ 15 分钟时用 `ambiguous='infer'`（相邻数据点能推断方向）
+3. 只有在明确知道 DST 方向时才用 `True/False` 手动指定
 
 ---
 
-### Bug: SQLite 999-variable limit
-**What happened:** Inserting 29,899 SmartThings rows in one statement raised
-`sqlite3.OperationalError: too many SQL variables`. SQLite limits bound parameters
-per statement to 999.
-**Fix:** Batched inserts in `_upsert_ignore()` with `batch_size = 999 // n_columns`.
-**Lesson:** Always batch large inserts. The limit is a SQLite hard constraint, not a
-configuration issue. The fix belongs in the database layer, not the caller.
+### Bug：SQLite 999 变量上限
+**现象：** SmartThings 文件有 ~30,000 行，一次性 INSERT 触发 `too many SQL variables`。SQLite 限制每条语句的绑定变量数 ≤ 999。
+
+**修复：** 在 `_upsert_ignore()` 里按批次插入，`batch_size = 999 // 列数`，动态计算，所有表通用。
+
+**教训：** 大批量写入永远要分批。这是 SQLite 硬限制，不是配置项。修复逻辑放在数据库层，调用方不需要知道细节。
 
 ---
 
-### Decision: Deduplication at DB layer
-**Design choice:** Duplicates are handled via `PRIMARY KEY` / `UNIQUE` constraints +
-`INSERT OR IGNORE`, not by Python-level pre-filtering.
-**Why:** This approach is O(1) per record (hash lookup in SQLite index), vs. O(n) for
-loading the full table into memory to check. With 1.7M SmartThings rows, memory
-pre-filtering would be impractical and fragile.
-**Result:** Loading all P1e files produced 223,245 parsed rows but only 106,013 unique
-epochs — 52% were cross-file duplicates, correctly discarded.
+### 决策：去重放在数据库层
+用 `PRIMARY KEY` / `UNIQUE` 约束 + `INSERT OR IGNORE`，而不是 Python 里先查询再比较。原因：每条记录 O(1) hash 查找，vs. 把整张表加载进内存做对比是 O(n)。实测：加载所有 P1e 文件解析了 223,245 行，只写入 106,013 条（52% 跨文件重复，全部正确丢弃）。
 
 ---
 
-## Phase 2 — Data Quality Report (2026-04-10)
+## 第二阶段 — 数据质量报告
 
-### Finding: Electricity & gas share the same coverage gap
-**Observed:** Both `electricity_readings` and `gas_readings` have exactly **1 gap > 1 day**.
-Given both are from the same physical P1 smart meter, this almost certainly reflects
-the same hardware/collection outage, not a data processing error.
-**Implication:** Any analysis spanning that gap should be treated with caution. The gap
-period should be explicitly excluded from daily/weekly pattern analyses.
-**Status:** Need to identify exact dates — see notebook Section 2.
+### Bug：`shift(1)` 在子集 DataFrame 上的陷阱
+**现象：** `gaps["gap_start"] = gaps["dt"].shift(1)`，当 `gaps` 只有 1 行时，`.shift(1)` 在子集内操作，结果是 NaT。输出显示 gap_start 为 "N/A"。
 
-### Finding: SmartThings data starts Oct 2022, electricity/gas from Mar 2022
-**Observed:** Electricity and gas data start 2022-03-18; SmartThings starts 2022-10-09.
-**Implication:** There is a ~7 month window (Mar–Oct 2022) where energy data exists but
-device behavior data does not. Cross-source analyses must respect this.
-**Decision:** Cross-source analyses will use 2022-10-09 as the common start date.
+**修复：** 改成 `df_e["dt"].shift(1).loc[gaps.index]`——在完整 DataFrame 上 shift，再用 index 取需要的行。
 
-### Finding: Extreme device activity imbalance
-**Observed:** Garden air sensor: 276,593 messages; Garden (ground): 52 messages.
-Ratio: ~5,300:1 across 40 devices.
-**Implication:** Naive "per-device" averages are meaningless. Any aggregation must be
-aware of this imbalance. Some devices may have been installed/removed mid-dataset.
-**Open question:** Do the low-activity devices reflect broken sensors or genuinely
-quiet devices (e.g. a door that's rarely opened)?
-
-### Finding: SmartThings 2022-10-09 has only 17 messages
-**Observation:** First day of SmartThings data has 17 messages vs. median of 1,845.
-**Assessment:** This is almost certainly a partial-day artifact (data collection started
-partway through the day), not a sensor malfunction. Not a quality issue.
+**为什么危险：** 没有报错，只有静默的错误值。这类"逻辑正确、语义错误"的 bug 是数据分析里最难发现的。
 
 ---
 
-## Open Questions (to be addressed in upcoming analyses)
+### 发现：spike 不是异常，是断口的"尾迹"
+18.72 kWh 的单区间增量看起来是异常值，但对应的 `gap_min = 2205`（36 小时）。这是断口期间的累积用量在恢复后一次性报出来，不是传感器故障。
 
-1. **What are the exact dates of the electricity/gas gap?** Is it a single continuous
-   outage, or multiple short ones above the 30-min threshold only?
-2. **Do any SmartThings devices have multi-day gaps mid-dataset?** Which ones, and when?
-3. **Are temperature sensor readings from SmartThings consistent with Open-Meteo weather?**
-   The garden sensor should correlate with outdoor weather data.
-4. **Is the 2024-08-15 peak (4,667 messages) a real activity spike or a data artifact?**
-5. **Does the electricity/gas gap coincide with any SmartThings anomaly?**
+**教训：** 评估 spike 必须同时看 gap_min。把它当离群值删掉会导致总用量统计偏低。正确处理是把断口期间标记为 NA，不做插值。
 
 ---
 
----
+### 发现：燃气消耗低于荷兰平均水平
+~1,196 m³/年 vs. 荷兰独栋住宅平均 1,500–2,000 m³/年。可能的原因：好的隔热、较小的户型，或者 Nordwijk 海边位置冬季比内陆温和。
 
-## Phase 2 — Data Quality Report: Reflections (2026-04-10)
-
-### Bug: shift(1) on a subset DataFrame gives NaT
-**What happened:** Gap detection code used `gaps["gap_start"] = gaps["dt"].shift(1)`.
-When `gaps` has only one row (one outage in electricity data), `.shift(1)` operates
-within the subset and gives NaT. The gap start showed as "N/A" in output.
-**Fix:** `df_e["dt"].shift(1).loc[gaps.index]` — shift in the full DataFrame, then
-select the rows we need by index. This is index-aligned, not subset-shifted.
-**Why this matters:** The bug produced silently wrong output — no error, just a missing
-value. This class of bug (logical error with no exception) is the most dangerous kind
-in data analysis. The fix reveals the gap started 2024-01-29 12:15, which is a
-concrete, actionable piece of information.
-
-### Finding: The "spike" is not an anomaly — it is a gap artifact
-**Observation:** A single 18.72 kWh increment flagged as a spike turned out to have
-`gap_min = 2205`. This is 36 hours of accumulated usage reported in one reading.
-**Lesson:** Never evaluate a spike without checking its gap_min. A large value that
-coincides with a temporal gap is expected: it is the cumulative energy during the
-outage period, not a sensor error. Removing it as an "outlier" would undercount
-total consumption. The correct treatment is to exclude the gap period from rate-of-
-change analyses, not to remove the cumulative reading.
-
-### Finding: Gas consumption is below Dutch average — analytically interesting
-**Observed:** ~1,196 m³/year vs. Dutch national average of ~1,500–2,000 m³/year.
-**Hypothesis:** This could reflect good insulation, a smaller household, or a milder
-local climate (coastal Nordwijk has fewer frost days than inland areas).
-**Why log this:** This baseline will anchor the temperature-gas regression analysis.
-If the model explains, say, 80% of gas variance with temperature alone, the residual
-20% is where insulation quality and behavioural patterns live — exactly the kind of
-decomposition CBS would be interested in for building energy labels.
-
-### Reflection: CBS framing changes the analytical priorities
-**Observation:** When writing the report with CBS in mind, the framing shifted
-naturally: not "here are some patterns in a house" but "here is what a methodology
-for household-level smart meter analytics looks like". This reframing changes what
-counts as a good result.
-- A finding that "this house uses 9.97 kWh/day" is a description.
-- A finding that "heating degree days explain 78% of gas variance, with an effect
-  size of X m³/°C-day" is a transferable methodology that CBS could apply to
-  thousands of households.
-**Decision going forward:** Frame all analytical conclusions in terms of the method
-and its parameters, not just the specific numbers from this one household.
-
-### Reflection: Device dropout tells a human story
-**Observation:** The Christmas tree socket, the holiday sound speaker, the boiler
-that was probably replaced — these "data quality issues" are actually a narrative
-of how a real family uses technology. The data quality lens and the human behaviour
-lens are the same lens.
-**Implication for occupancy analysis:** If we can explain *why* devices go quiet
-(seasonal removal vs. hardware failure), we can use that same reasoning in reverse:
-identifying when patterns of *multiple simultaneous* device state changes suggest
-the family left for a holiday. This is a non-trivial but tractable signal.
-
-### Open question resolved: ERA5 vs. in-situ validation
-**Decision:** Report 3 (Weather Sensor Validation) will directly compare the ERA5
-temperature series with the SmartThings garden sensor. This is not just a sanity
-check — it is a scientific question. Nordwijk is coastal; ERA5 at 9km resolution
-may smooth out the sea-breeze effect that moderates local summer temperatures. If
-ERA5 systematically overestimates summer peaks, the temperature-gas regression will
-be biased. We need to know this before trusting the regression coefficients.
+**意义：** 这个基准值会成为后续温度-燃气回归模型的锚点。如果模型能用室外温度解释 80% 的燃气方差，剩下 20% 的"残差"里藏着隔热性能和行为模式——正是 CBS 关心的建筑能效标签所需要的信息。
 
 ---
 
-*Log continues in subsequent phases...*
+### 反思：CBS 的定位改变了分析优先级
+CBS 不是传统意义上的政府统计机构，它非常市场化、面向政策的实际应用。这迫使分析结论要从"这家人用了多少电"升级成"这套用 P1 智能电表 + IoT 设备 + 气象数据联合分析的方法论，可以推广到多少荷兰家庭"。
+
+**结论：** 方法论的可迁移性 > 这家人的具体数字。后续分析要把参数（效应量、拟合优度、置信区间）放在首位，而不是具体读数。
+
+---
+
+### 反思：设备"掉线"是生活故事，不只是数据问题
+圣诞树插座在 11 月后下线、客厅音箱装了几天就拔掉、锅炉在 2023 年 7 月之后消失……这些"数据质量问题"同时也是一个家庭如何使用智能家居技术的真实记录。
+
+**对后续"在家/不在家检测"的启发：** 如果我们能解释为什么设备安静了（季节性拆除 vs. 硬件故障），就能用同样的逻辑反推：当多个设备同时进入静默状态，很可能这家人出门度假了。这是一个有价值的信号。
+
+---
+
+### 决策：必须做 ERA5 与实地传感器的对比验证
+花园气温传感器（276K 条记录）提供了真实的现场温度数据。ERA5 是 9km 分辨率的格点再分析数据，在海边城市可能低估海风的降温效果。
+
+**为什么这个验证不能省：** 如果 ERA5 在夏季高温日系统性高估温度，温度-燃气回归的系数就会有偏差。要在做回归之前知道这个偏差的方向和量级，而不是做完了再回头质疑。
+
+---
+
+### 开放问题（待后续分析解答）
+
+1. ERA5 和花园传感器的温度偏差有多大？夏季和冬季是否不对称？
+2. 温度能解释多少比例的燃气方差？残差的结构是什么？
+3. 能否从运动传感器信号中可靠区分"有人在家"和"无人在家"？
+4. 2024-08-15 消息量峰值（4,667条）是真实的活动峰值还是数据采集异常？
+
+---
+
+*日志持续更新中……*
