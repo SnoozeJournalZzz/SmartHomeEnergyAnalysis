@@ -111,4 +111,69 @@ partway through the day), not a sensor malfunction. Not a quality issue.
 
 ---
 
+---
+
+## Phase 2 — Data Quality Report: Reflections (2026-04-10)
+
+### Bug: shift(1) on a subset DataFrame gives NaT
+**What happened:** Gap detection code used `gaps["gap_start"] = gaps["dt"].shift(1)`.
+When `gaps` has only one row (one outage in electricity data), `.shift(1)` operates
+within the subset and gives NaT. The gap start showed as "N/A" in output.
+**Fix:** `df_e["dt"].shift(1).loc[gaps.index]` — shift in the full DataFrame, then
+select the rows we need by index. This is index-aligned, not subset-shifted.
+**Why this matters:** The bug produced silently wrong output — no error, just a missing
+value. This class of bug (logical error with no exception) is the most dangerous kind
+in data analysis. The fix reveals the gap started 2024-01-29 12:15, which is a
+concrete, actionable piece of information.
+
+### Finding: The "spike" is not an anomaly — it is a gap artifact
+**Observation:** A single 18.72 kWh increment flagged as a spike turned out to have
+`gap_min = 2205`. This is 36 hours of accumulated usage reported in one reading.
+**Lesson:** Never evaluate a spike without checking its gap_min. A large value that
+coincides with a temporal gap is expected: it is the cumulative energy during the
+outage period, not a sensor error. Removing it as an "outlier" would undercount
+total consumption. The correct treatment is to exclude the gap period from rate-of-
+change analyses, not to remove the cumulative reading.
+
+### Finding: Gas consumption is below Dutch average — analytically interesting
+**Observed:** ~1,196 m³/year vs. Dutch national average of ~1,500–2,000 m³/year.
+**Hypothesis:** This could reflect good insulation, a smaller household, or a milder
+local climate (coastal Nordwijk has fewer frost days than inland areas).
+**Why log this:** This baseline will anchor the temperature-gas regression analysis.
+If the model explains, say, 80% of gas variance with temperature alone, the residual
+20% is where insulation quality and behavioural patterns live — exactly the kind of
+decomposition CBS would be interested in for building energy labels.
+
+### Reflection: CBS framing changes the analytical priorities
+**Observation:** When writing the report with CBS in mind, the framing shifted
+naturally: not "here are some patterns in a house" but "here is what a methodology
+for household-level smart meter analytics looks like". This reframing changes what
+counts as a good result.
+- A finding that "this house uses 9.97 kWh/day" is a description.
+- A finding that "heating degree days explain 78% of gas variance, with an effect
+  size of X m³/°C-day" is a transferable methodology that CBS could apply to
+  thousands of households.
+**Decision going forward:** Frame all analytical conclusions in terms of the method
+and its parameters, not just the specific numbers from this one household.
+
+### Reflection: Device dropout tells a human story
+**Observation:** The Christmas tree socket, the holiday sound speaker, the boiler
+that was probably replaced — these "data quality issues" are actually a narrative
+of how a real family uses technology. The data quality lens and the human behaviour
+lens are the same lens.
+**Implication for occupancy analysis:** If we can explain *why* devices go quiet
+(seasonal removal vs. hardware failure), we can use that same reasoning in reverse:
+identifying when patterns of *multiple simultaneous* device state changes suggest
+the family left for a holiday. This is a non-trivial but tractable signal.
+
+### Open question resolved: ERA5 vs. in-situ validation
+**Decision:** Report 3 (Weather Sensor Validation) will directly compare the ERA5
+temperature series with the SmartThings garden sensor. This is not just a sanity
+check — it is a scientific question. Nordwijk is coastal; ERA5 at 9km resolution
+may smooth out the sea-breeze effect that moderates local summer temperatures. If
+ERA5 systematically overestimates summer peaks, the temperature-gas regression will
+be biased. We need to know this before trusting the regression coefficients.
+
+---
+
 *Log continues in subsequent phases...*
