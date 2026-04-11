@@ -4,8 +4,15 @@ Dash + Plotly, reads pre-computed CSVs from data_cache/.
 
 Local:  python app.py
 Deploy: gunicorn app:server
+
+Data contract
+-------------
+All files in data_cache/ are produced by export_dashboard_data.py.
+Run that script once locally (or in CI) before running or deploying this app.
+The app never connects to the database — it only reads pre-computed files.
 """
 
+import json
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -15,19 +22,49 @@ from dash import Dash, dcc, html, Input, Output
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 BASE = Path(__file__).parent / 'data_cache'
-daily     = pd.read_csv(BASE / 'daily_energy.csv', parse_dates=['date'])
+daily      = pd.read_csv(BASE / 'daily_energy.csv', parse_dates=['date'])
 heatmap_df = pd.read_csv(BASE / 'elec_heatmap.csv')
-hourly    = pd.read_csv(BASE / 'hourly_clusters.csv', parse_dates=['hour_utc'])
-clust_sum = pd.read_csv(BASE / 'cluster_summary.csv')
+hourly     = pd.read_csv(BASE / 'hourly_clusters.csv', parse_dates=['hour_utc'])
+clust_sum  = pd.read_csv(BASE / 'cluster_summary.csv')
 
-# ── Regression coefficients (HDD model, computed from daily data) ──────────────
+# ── HDD regression parameters — loaded from pre-computed JSON ─────────────────
+# WHY load from JSON instead of re-computing here?
+#
+# Previously this block used np.polyfit on the CSV data, which created two
+# separate code paths for "the same" regression:
+#   1. report_energy_analysis.ipynb  — statsmodels smf.ols  (the canonical source)
+#   2. app.py                         — np.polyfit           (the copy)
+#
+# The copy introduced a subtle bug: np.polyfit's RMSE used 'n' in the
+# denominator, while statsmodels uses 'n-2' (unbiased).  More importantly,
+# any future change to the regression (different base temperature, different
+# outage exclusion window) would need to be made in TWO places.
+#
+# The fix: export_dashboard_data.py fits the model with statsmodels (matching
+# the notebook exactly) and writes the four scalar results to hdd_model.json.
+# This app reads those scalars.  There is now exactly ONE place where the
+# regression is computed.
+#
+# HOW to update: re-run `python export_dashboard_data.py` whenever the data
+# changes. The JSON is the single source of truth for all regression numbers
+# shown in the Dashboard.
+_hdd_model_path = BASE / 'hdd_model.json'
+try:
+    with open(_hdd_model_path) as _fh:
+        _m = json.load(_fh)
+    slope     = _m['slope']
+    intercept = _m['intercept']
+    R2        = _m['r2']
+    RMSE      = _m['rmse']
+except FileNotFoundError:
+    raise FileNotFoundError(
+        f"'{_hdd_model_path}' not found.\n"
+        "Run  python export_dashboard_data.py  to generate it, then restart the app."
+    )
+
+# reg is still needed by fig_regression() for the scatter points and season colouring.
+# It is NOT used to recompute slope/intercept/R²/RMSE any more.
 reg = daily.dropna(subset=['gas_m3', 'hdd'])
-slope, intercept = np.polyfit(reg['hdd'], reg['gas_m3'], 1)
-y_pred = slope * reg['hdd'].values + intercept
-ss_res = ((reg['gas_m3'].values - y_pred) ** 2).sum()
-ss_tot = ((reg['gas_m3'].values - reg['gas_m3'].mean()) ** 2).sum()
-R2   = 1 - ss_res / ss_tot
-RMSE = np.sqrt(ss_res / len(reg))
 
 # ── App init ───────────────────────────────────────────────────────────────────
 app = Dash(

@@ -64,16 +64,29 @@ Raw Files (CSV / TSV / JSON)
 
 ```
 SmartHomeEnergyAnalysis/
-├── home_messages_db.py            Database access class (only entry point to the DB)
+├── home_messages_db.py            Database access class (sole DB entry point)
 ├── p1e.py                         CLI: load electricity data
 ├── p1g.py                         CLI: load gas data
 ├── smartthings.py                 CLI: load SmartThings device messages
 ├── openweathermap.py              CLI: fetch and store weather data
+├── export_dashboard_data.py       Pre-compute dashboard cache from DB
+├── app.py                         Interactive Dash dashboard
+├── render.yaml                    Render.com deployment config
 ├── report_data_quality.ipynb      Data quality audit ✅
 ├── report_energy_analysis.ipynb   Comprehensive energy analysis ✅
 ├── report_forecasting.ipynb       Next-day energy forecasting ✅
+├── tests/
+│   └── test_parsers.py            Unit tests for ETL parsers (pytest)
+├── conftest.py                    pytest flat-layout path config
+├── requirements.in                Direct dependencies (human-maintained)
+├── requirements.txt               Pinned lockfile (pip-compile generated)
 ├── ANALYSIS_LOG.md                Decision and reflection log
-├── requirements.txt
+├── data_cache/                    Pre-computed CSV + JSON for dashboard
+│   ├── daily_energy.csv
+│   ├── elec_heatmap.csv
+│   ├── hourly_clusters.csv
+│   ├── cluster_summary.csv
+│   └── hdd_model.json
 └── data/data/
     ├── P1e/                       Raw electricity files
     ├── P1g/                       Raw gas files
@@ -89,9 +102,36 @@ git clone https://github.com/SnoozeJournalZzz/SmartHomeEnergyAnalysis.git
 cd SmartHomeEnergyAnalysis
 
 python3 -m venv .venv
-source .venv/bin/activate       # Windows: .venv\Scripts\activate
+source .venv/bin/activate       
 pip install -r requirements.txt
 ```
+
+---
+
+## Running the Dashboard
+
+```bash
+# Generate pre-computed cache (required once after loading data)
+python export_dashboard_data.py
+
+# Launch the dashboard locally
+python app.py
+# → Open http://localhost:8050 in your browser
+```
+
+The dashboard reads only from `data_cache/` — the raw database is never deployed.
+For production deployment, the `render.yaml` at the project root configures a Render.com web service (gunicorn, Python 3.13).
+
+---
+
+## Running Tests
+
+```bash
+pytest tests/
+```
+
+20 unit tests covering: electricity and gas ETL parsers, SmartThings parser,
+UTC epoch conversion, DST edge cases (CET → CEST), and deduplication logic.
 
 ---
 
@@ -179,14 +219,12 @@ correct second-precision integers regardless of the underlying precision.
 | Data cleaning | Timezone / DST handling, gap detection, anomaly classification |
 | SQL | SQLite, parameterised queries, aggregate statistics |
 | Data analysis | pandas, time-series, cross-source alignment |
-| Visualisation | Matplotlib, Plotly Dash |
+| Visualisation | Matplotlib, Plotly Dash interactive dashboard |
 | Statistics | OLS regression, HDD model, residual diagnostics, K-means, DBSCAN, silhouette scoring, variance decomposition |
 | Machine learning | LightGBM, logistic regression, feature engineering (lag/rolling), time-series cross-validation (expanding window), ablation testing, AUC evaluation |
+| Testing | pytest, 20 unit tests, DST edge cases, flat-layout conftest |
+| Deployment | Render.com, gunicorn, pip-tools lockfile (requirements.in + requirements.txt) |
 | Version control | Git, conventional commits |
-
----
-
----
 
 ---
 
@@ -194,7 +232,7 @@ correct second-precision integers regardless of the underlying precision.
 
 ## 项目简介
 
-本项目基于荷兰 Nordwijk 一户真实家庭的智能家居数据，数据跨度 32 个月（2022 年 3 月至 2025 年 3 月），由本项目与荷兰统计局（CBS）合作收集。
+本项目基于荷兰 Nordwijk 一户真实家庭的智能家居数据，数据跨度 32 个月（2022 年 3 月至 2025 年 3 月），由荷兰统计局（CBS）提供。
 
 数据来源包括：P1 智能电表（电力 + 燃气，15 分钟分辨率）、约 40 个 SmartThings 智能家居设备（运动传感器、温度传感器、门磁、智能插座等），以及 Open-Meteo 提供的历史气象数据。
 
@@ -271,7 +309,7 @@ correct second-precision integers regardless of the underlying precision.
 
 ---
 
-## 核心工程决策（体现代码规范意识）
+## 注释
 
 - **时间戳全部存为 UTC epoch 整数**，时区转换逻辑集中在 ETL 层，分析层不接触任何时区处理
 - **去重在数据库层完成**（`INSERT OR IGNORE` + 唯一约束），O(1) 查找，不需要把已有数据加载进内存对比

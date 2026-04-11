@@ -267,17 +267,51 @@ class HomeMessagesDB:
         name:        str | None = None,
         capability:  str | None = None,
         attribute:   str | None = None,
+        value:       str | None = None,
     ) -> pd.DataFrame:
         """
         Return SmartThings messages as a DataFrame, with optional filters.
+
+        Parameters
+        ----------
+        start_epoch, end_epoch : int, optional
+            UTC epoch bounds (inclusive).
+        loc, name, capability, attribute, value : str, optional
+            Exact-match filters.  ``value`` filters the ``value`` column
+            (e.g. ``value='active'`` for motion events, ``value='open'``
+            for contact events).  All filters are combined with AND.
 
         Returns
         -------
         pd.DataFrame
             Columns: ``id``, ``loc``, ``level``, ``name``, ``epoch``,
             ``capability``, ``attribute``, ``value``, ``unit``.
+
+        Notes
+        -----
+        Why ``WHERE 1=1``?
+            It is a common SQL pattern that lets us unconditionally append
+            ``AND <condition>`` clauses without needing to track whether a
+            WHERE keyword has already been emitted.  The query planner
+            optimises it away at zero cost.
+
+        Examples
+        --------
+        # All motion-active events for a specific epoch range
+        >>> db.get_smartthings(
+        ...     capability='motionSensor', attribute='motion', value='active',
+        ...     start_epoch=1666000000, end_epoch=1740000000,
+        ... )
+
+        # All door-open events (no epoch filter)
+        >>> db.get_smartthings(
+        ...     capability='contactSensor', name='Door (main)', value='open',
+        ... )
         """
-        query = "SELECT id, loc, level, name, epoch, capability, attribute, value, unit FROM smartthings_messages WHERE 1=1"
+        query = (
+            "SELECT id, loc, level, name, epoch, capability, attribute, value, unit "
+            "FROM smartthings_messages WHERE 1=1"
+        )
         params: dict = {}
 
         query, params = self._apply_epoch_filter(query, start_epoch, end_epoch, params)
@@ -294,6 +328,15 @@ class HomeMessagesDB:
         if attribute is not None:
             query += " AND attribute = :attribute"
             params["attribute"] = attribute
+        # WHY add value filter here rather than a separate method:
+        # All four notebook queries that previously used db._engine.connect()
+        # are filtering the same smartthings_messages table with varying
+        # combinations of these exact columns.  Adding one optional parameter
+        # is the minimal change that eliminates all four raw-SQL violations
+        # without introducing redundant helper methods.
+        if value is not None:
+            query += " AND value = :value"
+            params["value"] = value
 
         query += " ORDER BY epoch"
         with self._engine.connect() as conn:

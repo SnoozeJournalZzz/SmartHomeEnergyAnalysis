@@ -5,14 +5,21 @@ export_dashboard_data.py — Pre-compute dashboard data from myhome.db.
 Run once locally before deploying:
     python export_dashboard_data.py
 
-Outputs four small CSV files to data_cache/ that the Dash app reads.
-The database itself is never deployed.
+Outputs to data_cache/:
+    daily_energy.csv     — daily electricity, gas, temperature, HDD, season
+    elec_heatmap.csv     — mean electricity by hour × day-of-week
+    hourly_clusters.csv  — hourly electricity + K-means cluster labels
+    cluster_summary.csv  — per-cluster mean kWh and motion counts
+    hdd_model.json       — HDD regression parameters (slope, intercept, R², RMSE)
+
+The database itself is never deployed; the app reads only these files.
 """
 
+import json
 import numpy as np
 import pandas as pd
+import statsmodels.formula.api as smf
 from pathlib import Path
-from sqlalchemy import text
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
@@ -70,6 +77,60 @@ daily = pd.concat([
 
 daily['hdd'] = (HDD_BASE - daily['temp_c']).clip(lower=0)
 
+# ── 1b. HDD regression model → data_cache/hdd_model.json ─────────────────────
+# WHY use statsmodels here instead of np.polyfit?
+# The Notebook (report_energy_analysis.ipynb, Cell 12) uses smf.ols, which is
+# the canonical source of the R² = 0.806 and slope = 0.55 m³/degree-day figures
+# cited in the README and rendered in the Dashboard KPI card.
+# np.polyfit would give nearly identical numbers but:
+#   1. It uses n (not n-2) in the RMSE denominator — technically biased
+#   2. It creates a second code path that can silently diverge from the notebook
+# By using the same estimator here, we guarantee that the Dashboard and the
+# analysis report always show exactly the same numbers.
+#
+# WHY serialize to JSON (not pickle, not CSV)?
+# pickle has security risks and version-lock issues.  CSV is awkward for
+# key-value pairs.  JSON is human-readable: you can open the file and verify
+# the numbers match the notebook before deploying — no Python needed.
+#
+# WHY compute this BEFORE converting the index to date strings (line below)?
+# Statsmodels works fine with string indices, but fitting on a datetime index
+# is cleaner and avoids any risk of format-dependent parsing bugs.
+print('Fitting HDD regression model...')
+hdd_fit_df = daily.dropna(subset=['gas_m3', 'hdd']).copy()
+
+# Match the notebook's outage exclusion (Jan 29–31 2024 meter outage).
+# In the notebook this is done explicitly; here the min_count=80 filter in
+# the resample already makes these days NaN, so dropna() handles them.
+# We document this assumption so future maintainers can verify it holds.
+# If you add new gap days to daily_energy.csv, ensure they are NaN before
+# this fit — don't just add zeros.
+model = smf.ols('gas_m3 ~ hdd', data=hdd_fit_df).fit()
+
+hdd_params = {
+    # Core parameters used by app.py for the regression plot and KPI card
+    'slope':      float(model.params['hdd']),
+    'intercept':  float(model.params['Intercept']),
+    'r2':         float(model.rsquared),
+    # RMSE = sqrt(MSE residual) — uses n-2 degrees of freedom (statsmodels default)
+    # This is the unbiased estimator; app.py previously used n (biased).
+    'rmse':       float(np.sqrt(model.mse_resid)),
+    # Metadata: not used by app.py logic, but makes the JSON self-documenting
+    'n_days':     int(len(hdd_fit_df)),
+    'hdd_base':   float(HDD_BASE),
+    'computed_at': pd.Timestamp.now().strftime('%Y-%m-%d'),
+    'source':     'export_dashboard_data.py — statsmodels smf.ols',
+}
+
+hdd_json_path = Path('data_cache/hdd_model.json')
+with open(hdd_json_path, 'w') as fh:
+    json.dump(hdd_params, fh, indent=2)
+print(
+    f'  → hdd_model.json  '
+    f'(R²={hdd_params["r2"]:.4f}, slope={hdd_params["slope"]:.4f}, '
+    f'intercept={hdd_params["intercept"]:.4f})'
+)
+
 def season(month):
     return {12: 'Winter', 1: 'Winter', 2: 'Winter',
             3: 'Spring', 4: 'Spring', 5: 'Spring',
@@ -96,18 +157,19 @@ print(f'  → {len(heatmap)} cells')
 
 # ── 3. Occupancy clusters → data_cache/hourly_clusters.csv ────────────────────
 print('Loading SmartThings motion events...')
-with db._engine.connect() as conn:
-    motion_raw = pd.read_sql(
-        text("""
-            SELECT epoch, name
-            FROM smartthings_messages
-            WHERE capability = 'motionSensor'
-              AND attribute  = 'motion'
-              AND value      = 'active'
-              AND epoch BETWEEN :s AND :e
-        """),
-        conn, params={'s': EPOCH_START, 'e': EPOCH_END}
-    )
+# WHY get_smartthings() instead of db._engine?
+# home_messages_db.py's contract: "No SQL or SQLAlchemy code is allowed outside
+# this module."  The value= parameter added in P0 covers this exact query.
+# We select only the columns we need (epoch, name) by filtering downstream;
+# get_smartthings() returns all columns, which is fine — the extras are just
+# dropped in the groupby below.
+motion_raw = db.get_smartthings(
+    capability='motionSensor',
+    attribute='motion',
+    value='active',
+    start_epoch=EPOCH_START,
+    end_epoch=EPOCH_END,
+)[['epoch', 'name']]
 
 # UTC integer division — avoids DST ambiguity
 motion_raw['hour_bin'] = pd.to_datetime(

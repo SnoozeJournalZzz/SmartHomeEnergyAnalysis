@@ -1,0 +1,10 @@
+{
+  "slope": 0.5518688153692135,
+  "intercept": 0.7810197173927412,
+  "r2": 0.8062097827731212,
+  "rmse": 1.2562272486572097,
+  "n_days": 907,
+  "hdd_base": 15.5,
+  "computed_at": "2026-04-12",
+  "source": "export_dashboard_data.py \u2014 statsmodels smf.ols"
+}

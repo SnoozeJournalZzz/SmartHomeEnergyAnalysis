@@ -1,0 +1,38 @@
+# requirements.in — Direct dependencies only.
+#
+# This file lists the packages that this project DIRECTLY imports.
+# It is the human-maintained source of truth for dependency decisions.
+#
+# requirements.txt is the full pinned lockfile (all transitive deps, exact
+# versions).  It was generated from this file and should not be edited by hand.
+# To regenerate:  pip install pip-tools && pip-compile requirements.in
+#
+# To install for development (use the lockfile for reproducibility):
+#   pip install -r requirements.txt
+# To install just the direct deps (relaxed versions, useful for new environments):
+#   pip install -r requirements.in
+
+# ── Core data stack ───────────────────────────────────────────────────────────
+pandas>=3.0          # DataFrames, time-series resampling, tz handling
+numpy                # Numerical operations (linspace, sqrt, clip, etc.)
+sqlalchemy>=2.0      # ORM + database layer (home_messages_db.py)
+requests             # HTTP client for Open-Meteo weather API (openweathermap.py)
+
+# ── CLI tooling ───────────────────────────────────────────────────────────────
+click>=8.0           # Declarative CLI for ETL scripts (p1e.py, p1g.py, etc.)
+
+# ── Statistics & machine learning ────────────────────────────────────────────
+statsmodels>=0.14    # OLS regression, HDD model (report_energy_analysis.ipynb)
+scikit-learn>=1.5    # KMeans, DBSCAN, LogisticRegression, TimeSeriesSplit
+lightgbm>=4.0        # Gradient boosting for next-day energy forecasting
+
+# ── Visualisation ─────────────────────────────────────────────────────────────
+matplotlib>=3.9      # Static plots in analysis notebooks
+plotly>=6.0          # Interactive plots in Dash dashboard
+
+# ── Web dashboard ─────────────────────────────────────────────────────────────
+dash>=4.0            # Interactive web dashboard (app.py)
+gunicorn             # WSGI server for production deployment (render.yaml)
+
+# ── Interactive analysis ──────────────────────────────────────────────────────
+jupyterlab>=4.0      # Jupyter notebook environment for report_*.ipynb
