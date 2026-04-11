@@ -7,6 +7,25 @@ Developed in collaboration with **Statistics Netherlands (CBS)**.
 
 ---
 
+## Executive Summary
+
+Dutch households spend roughly **€2,400/year on energy** (2024 tariffs). Smart meters are near-universal, yet the data they generate is rarely used to understand *why* consumption varies day to day. CBS tasked this project with answering that question using 32 months of real metering data from a single home in Nordwijk — a dataset that includes electricity, gas, weather, and 40 IoT sensors simultaneously.
+
+![What drives this household's energy consumption?](docs/readme_chart.png)
+
+The analysis works through the problem in layers:
+
+| Question | Finding | Implication |
+|----------|---------|-------------|
+| What drives gas consumption? | HDD regression explains **80.6%** of daily gas variance; every degree-day below 15.5 °C adds **0.55 m³/day** | Baseline heating demand is predictable from weather alone — deviations signal equipment faults or behaviour change |
+| Does occupancy matter for electricity? | The quietest cluster (51% of hours, 3 motion events/h) uses **0.28 kWh/h**; the busiest (26 events/h) uses **0.67 kWh/h** — a **2.3× gap** | Occupancy scheduling, not appliance replacement, is the primary lever for demand-side management |
+| Can we forecast tomorrow's consumption? | LightGBM with a 7-day occupancy rhythm feature reaches electricity MAE of **2.07 kWh/day** vs. a naive baseline of **2.24 kWh/day** | A rolling motion average captures behavioural patterns that no calendar feature can |
+| What is that worth? | At 2024 Dutch tariffs (€1.25/m³ gas, €0.32/kWh electricity), combined model improvements translate to roughly **€70/household/year** | Applied across CBS's target population of 8 million smart-meter households, the gas component alone exceeds **€400 M/year** in aggregate |
+
+Three Jupyter reports and a live dashboard document every step — from raw files to policy-ready conclusions.
+
+---
+
 ## What This Project Is
 
 A household in Nordwijk, the Netherlands had its electricity meter, gas meter, and
