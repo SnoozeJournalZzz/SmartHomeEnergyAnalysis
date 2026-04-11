@@ -71,6 +71,7 @@ SmartHomeEnergyAnalysis/
 ├── openweathermap.py              CLI: fetch and store weather data
 ├── report_data_quality.ipynb      Data quality audit ✅
 ├── report_energy_analysis.ipynb   Comprehensive energy analysis ✅
+├── report_forecasting.ipynb       Next-day energy forecasting ✅
 ├── ANALYSIS_LOG.md                Decision and reflection log
 ├── requirements.txt
 └── data/data/
@@ -128,7 +129,26 @@ Five-part decomposition over the 29-month aligned window (Oct 2022 – Mar 2025)
 2. **Weather regression** — ERA5 validated against in-situ garden sensor (r=0.957, RMSE=2.2°C); HDD model explains **80.6%** of daily gas variance (slope: 0.55 m³/day per degree-day below 15.5°C)
 3. **Behavioural patterns** — motion sensor heatmaps and door-open profiles confirm weekday departure/return clusters (08:00–09:00 / 17:00–18:00); consistent with electricity consumption peaks
 4. **Occupancy detection** — K-means (K=6 by silhouette score) on 5-sensor hourly motion counts; low-activity cluster consumes **0.28 kWh/h** vs high-activity clusters at **0.67 kWh/h** (2.4× difference); DBSCAN confirms occupancy is a continuum rather than a binary switch
-5. **Synthesis** — variance decomposition: routine explains 15.4% of hourly electricity variance; adding occupancy state raises this to 23.3% (+7.9 pp); temperature adds a further 1.0 pp; 75.7% remains appliance-level noise not capturable at hourly resolution
+4b. **Occupancy validation** — door contact sensor events used as independent weak labels to validate K-means clusters; low-activity cluster is 65% *away* hours, highest-activity cluster is 71% *home* hours; logistic regression on 5-sensor counts achieves AUC=0.645 (vs 0.5 random), confirming the motion signal generalises across time; non-monotonic relationship between activity level and occupancy confirms the continuum finding from DBSCAN
+5. **Synthesis** — variance decomposition: routine explains 15.4% of hourly electricity variance; adding occupancy state raises this to 23.3% (+7.9 pp); temperature adds a further 1.0 pp; 75.7% remains appliance-level noise not capturable at hourly resolution; sequential decomposition limitation acknowledged
+
+### `report_forecasting.ipynb` ✅
+**Central question: given everything known at the end of today, how accurately can we predict tomorrow's electricity and gas consumption?**
+
+Chronological train/test split: 25 months training (Oct 2022 – Oct 2024), 5-month test window (Nov 2024 – Mar 2025, a full winter). Three models per target, evaluated on held-out test set:
+
+| Model | Gas MAE | Electricity MAE |
+|---|---|---|
+| Naive (yesterday's value) | 0.894 m³ | 2.236 kWh |
+| Linear regression | **0.702 m³** | 2.190 kWh |
+| LightGBM (tuned via TSCV) | 0.723 m³ | 2.073 kWh |
+
+Key findings:
+- **Gas**: linear regression slightly outperforms LightGBM — the temperature–gas relationship is near-linear (as established by the HDD model), so additional model complexity provides no structural advantage
+- **Electricity**: LightGBM with occupancy feature (`motion_roll7`, 7-day rolling mean of motion events) reduces MAE by 3.7% vs the no-occupancy baseline, confirming the predictive value of the Part 4 occupancy analysis
+- **Feature form matters**: raw daily motion count (`motion_lag1`) *worsened* predictions; the weekly rolling mean captured the occupancy *rhythm* rather than day-level noise — consistent with Part 4's finding that occupancy operates at the weekly behavioural level
+- **Time-series CV is not optional**: TSCV with expanding window selected n_estimators=50; using n_estimators=300 (the naive default) produced a model worse than the naive baseline
+- **Residual analysis**: gas residuals show no day-of-week pattern (confirming the boiler responds to temperature, not routine); electricity residuals reveal systematic Saturday over-prediction, evidence of behavioural drift not captured by calendar features
 
 ---
 
@@ -161,6 +181,7 @@ correct second-precision integers regardless of the underlying precision.
 | Data analysis | pandas, time-series, cross-source alignment |
 | Visualisation | Matplotlib, Plotly Dash |
 | Statistics | OLS regression, HDD model, residual diagnostics, K-means, DBSCAN, silhouette scoring, variance decomposition |
+| Machine learning | LightGBM, logistic regression, feature engineering (lag/rolling), time-series cross-validation (expanding window), ablation testing, AUC evaluation |
 | Version control | Git, conventional commits |
 
 ---
@@ -226,7 +247,27 @@ correct second-precision integers regardless of the underlying precision.
 2. **天气回归**：供暖度日（HDD）模型解释每日燃气用量方差的 **80.6%**（斜率：15.5°C 以下每度日增加 0.55 m³/天）
 3. **行为模式**：运动传感器与门磁事件分布，确认工作日出门（08:00–09:00）与回家（17:00–18:00）规律
 4. **在家状态检测**：5 个运动传感器的小时事件矩阵作为特征，K-means（K=6）聚类；低活跃簇用电 0.28 kWh/小时，高活跃簇达 0.67 kWh/小时（相差 2.4 倍）；DBSCAN 验证在家/不在家是连续谱而非二值开关
-5. **综合分解**：作息规律解释小时电力方差 15.4%；叠加在家状态后升至 23.3%（+7.9 pp）；温度再贡献 1.0 pp；剩余 75.7% 为家电级随机性
+4b. **在家状态验证**：以门磁传感器事件构造独立弱标签（出门窗口 07:00–10:00，回家窗口 15:00–21:00，间隔 ≥ 3 小时），交叉验证 K-means 聚类结果；低活跃簇中 65% 为"不在家"小时，高活跃簇中 71% 为"在家"小时；以 5 个运动传感器小时事件数训练逻辑回归分类器，5 折有序交叉验证 AUC=0.645（随机基线 0.5），确认运动信号具有可泛化的在家状态预测能力；簇与在家比例的非单调关系进一步印证"连续谱"结论
+5. **综合分解**：作息规律解释小时电力方差 15.4%；叠加在家状态后升至 23.3%（+7.9 pp）；温度再贡献 1.0 pp；剩余 75.7% 为家电级随机性；已在报告中明确说明顺序分解的方法论局限
+
+### `report_forecasting.ipynb` 次日能耗预测
+
+**核心问题：基于今天结束时的所有已知信息，能多准确地预测明天的用电量和用气量？**
+
+按时间顺序切分：前 25 个月（2022-10 至 2024-10）训练，最后 5 个月（2024-11 至 2025-03，完整冬季）测试。
+
+| 模型 | 燃气 MAE | 用电 MAE |
+|---|---|---|
+| Naive（昨天的值） | 0.894 m³ | 2.236 kWh |
+| 线性回归 | **0.702 m³** | 2.190 kWh |
+| LightGBM（TSCV 调参） | 0.723 m³ | 2.073 kWh |
+
+核心发现：
+- **燃气**：线性回归略优于 LightGBM——温度与燃气的关系接近线性，复杂模型没有结构优势
+- **用电**：加入在家状态特征（过去 7 日运动事件滚动均值）后，LightGBM 的 MAE 比无占用特征基线降低 3.7%，验证了第 4 部分占用状态分析的预测价值
+- **特征形式与特征选择同等重要**：原始日运动量（lag1）反而使预测变差；7 日滚动均值捕捉的是行为节律而非单日噪声
+- **时序交叉验证不可省略**：TSCV（扩展窗口）选出 n_estimators=50；若用默认的 300 棵树，预测效果差于 Naive 基线
+- **残差分析**：燃气残差无星期规律（锅炉响应物理而非日历）；用电残差揭示周六系统性高估，是行为漂移未被日历特征捕捉的证据
 
 ---
 
