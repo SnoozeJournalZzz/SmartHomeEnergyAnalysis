@@ -95,7 +95,7 @@ ax1.text(
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Panel 2 — Mean hourly electricity by occupancy cluster
-# Story: occupancy creates a 2.4× electricity gap
+# Story: occupancy creates a 2.3× electricity gap
 # ══════════════════════════════════════════════════════════════════════════════
 # Sort ascending by activity so quiet is at bottom, busy at top
 cs = cluster_sum.sort_values('mean_motion').reset_index(drop=True)
@@ -128,7 +128,7 @@ for bar, val in zip(bars, cs['mean_kwh']):
         va='center', ha='left', fontsize=9.5,
     )
 
-# 2.4× gap annotation between quietest and busiest bar
+# 2.3× gap annotation between quietest and busiest bar
 min_val = cs['mean_kwh'].iloc[0]   # quietest (bottom)
 max_val = cs['mean_kwh'].iloc[-1]  # busiest (top)
 mid_y   = (n - 1) / 2.0

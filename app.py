@@ -281,7 +281,7 @@ app.layout = html.Div([
             kpi_card('106K+',  'P1 meter readings',                '#E3F2FD', '#1565C0'),
             kpi_card('1.7M',   'SmartThings IoT events',           '#FFF3E0', '#E65100'),
             kpi_card(f'R²={R2:.2f}', 'Gas variance explained by temperature', '#E8F5E9', '#2E7D32'),
-            kpi_card('2.4×',   'Electricity: active home vs quiet','#F3E5F5', '#6A1B9A'),
+            kpi_card('2.3×',   'Electricity: active home vs quiet','#F3E5F5', '#6A1B9A'),
         ], style={'display': 'flex', 'gap': '14px', 'flexWrap': 'wrap'}),
     ], style={
         'padding': '18px 40px',
