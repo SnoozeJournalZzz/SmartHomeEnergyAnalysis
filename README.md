@@ -70,9 +70,7 @@ SmartHomeEnergyAnalysis/
 ├── smartthings.py                 CLI: load SmartThings device messages
 ├── openweathermap.py              CLI: fetch and store weather data
 ├── report_data_quality.ipynb      Data quality audit ✅
-├── report_energy_patterns.ipynb   Energy consumption patterns [in progress]
-├── report_gas_temperature.ipynb   Temperature–gas regression [planned]
-├── report_occupancy.ipynb         Occupancy detection via ML [planned]
+├── report_energy_analysis.ipynb   Comprehensive energy analysis ✅
 ├── ANALYSIS_LOG.md                Decision and reflection log
 ├── requirements.txt
 └── data/data/
@@ -118,18 +116,19 @@ Full data audit across all four sources.
 - One P1 meter outage (Jan 29–31 2024, 36.8 h) confirmed by cross-source epoch alignment
 - SmartThings starts 7 months after P1 meter — common analysis window: Oct 2022 onward
 - 8 devices went offline before dataset end; documented with exact dates and likely causes
-- Weather (ERA5) complete and physically plausible; in-situ validation flagged for next report
-- Closes with a quality scorecard and a justified analytical roadmap
+- Weather (ERA5) complete and physically plausible; validated against in-situ garden sensor
+- Closes with a quality scorecard and justified analytical roadmap
 
-### `report_energy_patterns.ipynb` *(in progress)*
-Time-series decomposition of electricity and gas. Daily/weekly heatmaps, seasonal trends.
+### `report_energy_analysis.ipynb` ✅
+**Central question: what drives this household's energy consumption — weather, routine, or occupancy?**
 
-### `report_gas_temperature.ipynb` *(planned)*
-OLS regression: outdoor temperature → daily gas consumption. Residual diagnostics,
-heating degree day model, confidence intervals.
+Five-part decomposition over the 29-month aligned window (Oct 2022 – Mar 2025):
 
-### `report_occupancy.ipynb` *(planned)*
-Occupancy inference from motion sensor patterns. Unsupervised clustering (K-means / DBSCAN).
+1. **Baseline patterns** — electricity and gas time series; daily/weekly heatmaps reveal stable two-peak routine
+2. **Weather regression** — ERA5 validated against in-situ garden sensor (r=0.957, RMSE=2.2°C); HDD model explains **80.6%** of daily gas variance (slope: 0.55 m³/day per degree-day below 15.5°C)
+3. **Behavioural patterns** — motion sensor heatmaps and door-open profiles confirm weekday departure/return clusters (08:00–09:00 / 17:00–18:00); consistent with electricity consumption peaks
+4. **Occupancy detection** — K-means (K=6 by silhouette score) on 5-sensor hourly motion counts; low-activity cluster consumes **0.28 kWh/h** vs high-activity clusters at **0.67 kWh/h** (2.4× difference); DBSCAN confirms occupancy is a continuum rather than a binary switch
+5. **Synthesis** — variance decomposition: routine explains 15.4% of hourly electricity variance; adding occupancy state raises this to 23.3% (+7.9 pp); temperature adds a further 1.0 pp; 75.7% remains appliance-level noise not capturable at hourly resolution
 
 ---
 
@@ -161,7 +160,7 @@ correct second-precision integers regardless of the underlying precision.
 | SQL | SQLite, parameterised queries, aggregate statistics |
 | Data analysis | pandas, time-series, cross-source alignment |
 | Visualisation | Matplotlib, Plotly Dash |
-| Statistics | OLS regression, residual analysis, clustering *(upcoming)* |
+| Statistics | OLS regression, HDD model, residual diagnostics, K-means, DBSCAN, silhouette scoring, variance decomposition |
 | Version control | Git, conventional commits |
 
 ---
@@ -215,16 +214,19 @@ correct second-precision integers regardless of the underlying precision.
 - **P1 计量器断点**：2024 年 1 月 29–31 日，持续约 36.8 小时，经电力与燃气数据的 epoch 交叉比对确认为同一硬件故障
 - **数据源对齐问题**：SmartThings 数据比 P1 数据晚启动约 7 个月，跨源分析的公共起点为 2022 年 10 月
 - **设备生命周期**：8 台设备在数据集结束前已下线，均有明确日期记录和合理解释（如季节性圣诞树插座、被更换的锅炉）
-- **气象数据**：ERA5 再分析数据完整无缺口，温度范围（−5.6°C 至 35.7°C）与 2022–2023 年欧洲热浪记录一致
-- 报告末尾给出结构化质量评分卡和后续分析路线图
+- **气象数据**：ERA5 再分析数据完整无缺口，已与花园传感器实地比对验证（r=0.957，RMSE=2.2°C）
 
-### 确认好后会更新
+### `report_energy_analysis.ipynb` 综合能耗分析
 
-| 报告 | 方法 | 状态 |
-|------|------|------|
-| 能耗时间模式 | 时间序列分解、日/周热力图 |
-| 温度-燃气回归 | OLS 回归、残差诊断、供暖度日模型 | 
-| 在家/不在家检测 | 运动传感器聚类（K-means / DBSCAN） | 
+**核心问题：这个家庭的能耗，究竟由天气、作息规律还是在家状态驱动？**
+
+五部分递进式分析，分析窗口为 2022 年 10 月至 2025 年 3 月：
+
+1. **基线模式**：电力与燃气时间序列，小时×星期热力图揭示稳定的双峰作息规律
+2. **天气回归**：供暖度日（HDD）模型解释每日燃气用量方差的 **80.6%**（斜率：15.5°C 以下每度日增加 0.55 m³/天）
+3. **行为模式**：运动传感器与门磁事件分布，确认工作日出门（08:00–09:00）与回家（17:00–18:00）规律
+4. **在家状态检测**：5 个运动传感器的小时事件矩阵作为特征，K-means（K=6）聚类；低活跃簇用电 0.28 kWh/小时，高活跃簇达 0.67 kWh/小时（相差 2.4 倍）；DBSCAN 验证在家/不在家是连续谱而非二值开关
+5. **综合分解**：作息规律解释小时电力方差 15.4%；叠加在家状态后升至 23.3%（+7.9 pp）；温度再贡献 1.0 pp；剩余 75.7% 为家电级随机性
 
 ---
 
