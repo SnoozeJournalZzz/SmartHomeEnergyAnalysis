@@ -14,11 +14,14 @@ The app never connects to the database — it only reads pre-computed files.
 
 import json
 from pathlib import Path
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
 from dash import Dash, dcc, html, Input, Output
+
+from charts import (
+    make_timeseries, make_heatmap, make_regression,
+    make_violin, make_motion_scatter,
+    CLUSTER_PALETTE,
+)
 
 # ── Load data ──────────────────────────────────────────────────────────────────
 BASE = Path(__file__).parent / 'data_cache'
@@ -78,7 +81,7 @@ server = app.server  # gunicorn entry point
 C_ELEC  = '#1E88E5'
 C_GAS   = '#F4511E'
 SEASONS = {'Winter': '#5C6BC0', 'Spring': '#43A047', 'Summer': '#FFA726', 'Autumn': '#8D6E63'}
-CLUSTER_PALETTE = px.colors.qualitative.Safe
+
 
 # ── Helper components ──────────────────────────────────────────────────────────
 def kpi_card(value, label, bg, accent):
@@ -106,153 +109,6 @@ def insight_box(children, accent='#1565C0', bg='#E3F2FD'):
         'fontSize': '0.88rem', 'color': '#444', 'marginTop': '16px',
         'lineHeight': 1.6,
     })
-
-
-# ── Figure builders ────────────────────────────────────────────────────────────
-def fig_timeseries():
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=daily['date'], y=daily['elec_kwh'],
-        name='Electricity (kWh/day)',
-        line=dict(color=C_ELEC, width=1.5),
-        fill='tozeroy', fillcolor='rgba(30,136,229,0.10)',
-    ))
-    fig.add_trace(go.Scatter(
-        x=daily['date'], y=daily['gas_m3'],
-        name='Gas (m³/day)',
-        line=dict(color=C_GAS, width=1.5),
-        fill='tozeroy', fillcolor='rgba(244,81,30,0.10)',
-        yaxis='y2',
-    ))
-    fig.update_layout(
-        template='plotly_white',
-        height=320,
-        margin=dict(l=60, r=70, t=40, b=50),
-        title='Daily Electricity and Gas Consumption',
-        legend=dict(orientation='h', y=1.12, x=0),
-        xaxis=dict(
-            rangeslider=dict(visible=True, thickness=0.06),
-            rangeselector=dict(buttons=[
-                dict(count=3,  label='3M',  step='month', stepmode='backward'),
-                dict(count=6,  label='6M',  step='month', stepmode='backward'),
-                dict(count=1,  label='1Y',  step='year',  stepmode='backward'),
-                dict(step='all', label='All'),
-            ], bgcolor='#F5F5F5', activecolor='#1E88E5', font=dict(size=11)),
-        ),
-        yaxis=dict(title='kWh/day', color=C_ELEC, titlefont_color=C_ELEC),
-        yaxis2=dict(title='m³/day', color=C_GAS, titlefont_color=C_GAS,
-                    overlaying='y', side='right'),
-    )
-    return fig
-
-
-def fig_heatmap():
-    pivot = heatmap_df.pivot_table(index='dow', columns='hour', values='mean_kwh')
-    days  = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    fig = go.Figure(go.Heatmap(
-        z=pivot.values,
-        x=[f'{h:02d}:00' for h in range(24)],
-        y=days,
-        colorscale='YlOrRd',
-        colorbar=dict(title='kWh', thickness=12, len=0.85),
-        hoverongaps=False,
-        hovertemplate='%{y}, %{x}: <b>%{z:.4f} kWh</b><extra></extra>',
-    ))
-    fig.update_layout(
-        template='plotly_white',
-        title='Mean Electricity — Hour of Day × Day of Week',
-        xaxis=dict(title='Hour of day', tickangle=0, tickfont_size=10),
-        margin=dict(l=60, r=80, t=50, b=40),
-        height=270,
-    )
-    return fig
-
-
-def fig_regression():
-    hdd_x   = np.linspace(0, reg['hdd'].max(), 200)
-    fig = go.Figure()
-
-    for s, grp in reg.groupby('season'):
-        g = grp.dropna(subset=['gas_m3', 'hdd'])
-        fig.add_trace(go.Scatter(
-            x=g['hdd'], y=g['gas_m3'],
-            mode='markers', name=s,
-            marker=dict(color=SEASONS[s], size=5, opacity=0.65,
-                        line=dict(color='white', width=0.3)),
-            hovertemplate=f'<b>{s}</b><br>HDD: %{{x:.1f}}<br>Gas: %{{y:.2f}} m³<extra></extra>',
-        ))
-
-    fig.add_trace(go.Scatter(
-        x=hdd_x, y=intercept + slope * hdd_x,
-        mode='lines', name='OLS fit',
-        line=dict(color='#1A237E', width=2.5),
-    ))
-    fig.add_annotation(
-        xref='paper', yref='paper', x=0.99, y=0.97, showarrow=False,
-        align='right', bgcolor='rgba(255,255,255,0.9)',
-        bordercolor='#BDBDBD', borderwidth=1,
-        text=(
-            f'<b>R² = {R2:.3f}</b><br>'
-            f'slope = {slope:.3f} m³ / degree-day<br>'
-            f'RMSE = {RMSE:.2f} m³/day<br>'
-            f'n = {len(reg)} days'
-        ),
-        font=dict(size=12, family='monospace'),
-    )
-    fig.update_layout(
-        template='plotly_white',
-        title='Gas Consumption vs Heating Degree Days (base 15.5 °C)',
-        xaxis_title='Heating Degree Days (HDD)',
-        yaxis_title='Daily gas (m³)',
-        legend=dict(orientation='h', y=-0.18, x=0),
-        margin=dict(l=60, r=30, t=60, b=90),
-        height=440,
-    )
-    return fig
-
-
-def fig_violin():
-    order   = clust_sum['cluster'].tolist()   # already sorted high→low motion
-    fig = go.Figure()
-    for i, cid in enumerate(order):
-        kwh    = hourly[hourly['cluster'] == cid]['kwh']
-        motion = clust_sum.loc[clust_sum['cluster'] == cid, 'mean_motion'].values[0]
-        kwh_c  = kwh.clip(upper=kwh.quantile(0.98))
-        fig.add_trace(go.Violin(
-            y=kwh_c, name=f'{motion:.0f} ev/h',
-            box_visible=True, meanline_visible=True,
-            fillcolor=CLUSTER_PALETTE[i % len(CLUSTER_PALETTE)],
-            opacity=0.8, line_color='rgba(0,0,0,0.25)',
-            hoverinfo='y+name',
-        ))
-    fig.update_layout(
-        template='plotly_white',
-        title='Electricity by Occupancy State (sorted: active → quiet)',
-        yaxis_title='kWh per hour',
-        xaxis_title='Cluster label = mean motion events/hour',
-        showlegend=False,
-        margin=dict(l=60, r=30, t=60, b=70),
-        height=380,
-    )
-    return fig
-
-
-def fig_motion_scatter():
-    sample = hourly.sample(min(5000, len(hourly)), random_state=42)
-    fig = px.scatter(
-        sample, x='motion_total', y='kwh', color='cluster',
-        color_continuous_scale='Turbo',
-        opacity=0.25,
-        labels={'motion_total': 'Motion events in hour',
-                'kwh': 'Electricity (kWh/hour)',
-                'cluster': 'Cluster'},
-        title='Motion Activity vs Electricity — each point is one hour',
-        template='plotly_white',
-        height=380,
-    )
-    fig.update_traces(marker_size=4)
-    fig.update_layout(margin=dict(l=60, r=30, t=60, b=60))
-    return fig
 
 
 # ── Layout ─────────────────────────────────────────────────────────────────────
@@ -318,9 +174,9 @@ def render_tab(tab):
 
     if tab == 'tab-1':
         return html.Div([
-            dcc.Graph(figure=fig_timeseries(), config={'displayModeBar': False}),
+            dcc.Graph(figure=make_timeseries(daily, C_ELEC, C_GAS), config={'displayModeBar': False}),
             html.Hr(style={'border': 'none', 'borderTop': '1px solid #E0E0E0', 'margin': '24px 0 20px'}),
-            dcc.Graph(figure=fig_heatmap(), config={'displayModeBar': False}),
+            dcc.Graph(figure=make_heatmap(heatmap_df), config={'displayModeBar': False}),
             insight_box([
                 'Electricity median ',
                 html.B(f"{daily['elec_kwh'].median():.1f} kWh/day"),
@@ -333,7 +189,7 @@ def render_tab(tab):
 
     elif tab == 'tab-2':
         return html.Div([
-            dcc.Graph(figure=fig_regression(), config={'displayModeBar': False}),
+            dcc.Graph(figure=make_regression(reg, slope, intercept, R2, RMSE, SEASONS), config={'displayModeBar': False}),
             insight_box([
                 f'Temperature explains ',
                 html.B(f'{R2*100:.1f}%'),
@@ -350,10 +206,10 @@ def render_tab(tab):
         return html.Div([
             html.Div([
                 html.Div([
-                    dcc.Graph(figure=fig_violin(), config={'displayModeBar': False}),
+                    dcc.Graph(figure=make_violin(hourly, clust_sum, CLUSTER_PALETTE), config={'displayModeBar': False}),
                 ], style={'flex': 1}),
                 html.Div([
-                    dcc.Graph(figure=fig_motion_scatter(), config={'displayModeBar': False}),
+                    dcc.Graph(figure=make_motion_scatter(hourly), config={'displayModeBar': False}),
                 ], style={'flex': 1}),
             ], style={'display': 'flex', 'gap': '20px'}),
             insight_box([

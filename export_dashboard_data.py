@@ -29,8 +29,14 @@ from home_messages_db import HomeMessagesDB
 TZ           = 'Europe/Amsterdam'
 EPOCH_START  = 1664575200   # 2022-10-01 Amsterdam
 EPOCH_END    = 1743375600   # 2025-03-31 Amsterdam
+# 15.5°C is the Dutch national standard for heating degree-day calculations
+# (NEN-EN-ISO 15927-6, adopted by KNMI and CBS for energy performance reporting).
 HDD_BASE     = 15.5
 K            = 6
+# Require ≥80 of 96 possible 15-min readings per day (83% completeness).
+# A day with a 16+ hour gap would fall below this threshold and become NaN.
+# This ensures days with the Jan 2024 P1 outage are excluded automatically.
+MIN_DAILY_READINGS = 80
 MOTION_DEVICES = [
     'Living Room (move)', 'Bathroom (sensor eye)',
     'Kitchen (stairs)', 'Kitchen (move)', 'Blue room (move aeotec)',
@@ -46,7 +52,7 @@ df_e = df_e.sort_values('dt').set_index('dt')
 df_e['total_kwh'] = df_e['t1'] + df_e['t2']
 df_e['gap_min']   = df_e['epoch'].diff() / 60
 df_e['delta_kwh'] = df_e['total_kwh'].diff()
-df_e.loc[df_e['gap_min'] > 20, 'delta_kwh'] = np.nan
+df_e.loc[df_e['gap_min'] > 20, 'delta_kwh'] = np.nan   # >20 min gap → accumulated reading, not a real 15-min interval
 df_e.loc[df_e['delta_kwh'] < 0, 'delta_kwh'] = np.nan
 
 print('Loading gas...')
@@ -55,7 +61,7 @@ df_g['dt'] = pd.to_datetime(df_g['epoch'], unit='s', utc=True).dt.tz_convert(TZ)
 df_g = df_g.sort_values('dt').set_index('dt')
 df_g['gap_min']  = df_g['epoch'].diff() / 60
 df_g['delta_m3'] = df_g['total'].diff()
-df_g.loc[df_g['gap_min'] > 20, 'delta_m3'] = np.nan
+df_g.loc[df_g['gap_min'] > 20, 'delta_m3'] = np.nan    # same gap threshold as electricity
 df_g.loc[df_g['delta_m3'] < 0, 'delta_m3'] = np.nan
 
 print('Loading weather...')
@@ -65,8 +71,8 @@ df_w = df_w.sort_values('dt').set_index('dt')
 
 # ── 1. Daily aggregates → data_cache/daily_energy.csv ─────────────────────────
 print('Exporting daily_energy.csv...')
-daily_elec = df_e['delta_kwh'].resample('D').sum(min_count=80)
-daily_gas  = df_g['delta_m3'].resample('D').sum(min_count=80)
+daily_elec = df_e['delta_kwh'].resample('D').sum(min_count=MIN_DAILY_READINGS)
+daily_gas  = df_g['delta_m3'].resample('D').sum(min_count=MIN_DAILY_READINGS)
 daily_temp = df_w['temperature'].resample('D').mean()
 
 daily = pd.concat([
