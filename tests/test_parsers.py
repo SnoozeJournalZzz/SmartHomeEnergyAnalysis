@@ -356,24 +356,26 @@ class TestParseSmartThings:
         assert len(df) == 1, \
             "Rows with identical (name, epoch, capability, attribute) must be deduped"
 
-    def test_same_device_different_value_not_deduped(self, tmp_path):
+    def test_same_key_different_value_still_deduped(self, tmp_path):
         """
-        Two events from the same device at the same time but with DIFFERENT
-        attribute values must both be kept.
+        Two rows with the same (name, epoch, capability, attribute) key but
+        DIFFERENT values must still be collapsed to one row.
 
-        Example: a temperature sensor reports 21.5°C and then 22.0°C at the
-        same epoch (rare but valid in practice).  Only identical
-        (name, epoch, capability, attribute) tuples are duplicates.
+        WHY: ``value`` is NOT part of the unique constraint in the database
+        (see SmartThingsMessage.__table_args__).  If two source files record
+        the same event with a slightly different value string (e.g. '21.5' vs
+        '21.50'), the deduplication key (name + epoch + capability + attribute)
+        must still discard the duplicate, not create two rows.  Keeping both
+        would violate the UNIQUE constraint on INSERT and raise an integrity
+        error that the OR IGNORE strategy would silently swallow — leaving an
+        inconsistent count between parser output and DB row count.
         """
-        row2 = {**self._ROW, "value": "inactive"}   # different value, same key
+        row2 = {**self._ROW, "value": "inactive"}   # different value, same dedup key
         f = _write_gz(tmp_path, "st.tsv.gz", _smartthings_tsv([
             self._ROW,
             row2,
         ]))
         df = parse_smartthings_file(f)
-        # Both rows have the same (name, epoch, capability, attribute),
-        # so they ARE duplicates under the dedup key.
-        # value is NOT part of the unique key — this is intentional.
         assert len(df) == 1, \
             "Same (name, epoch, capability, attribute) is a duplicate regardless of value"
 
