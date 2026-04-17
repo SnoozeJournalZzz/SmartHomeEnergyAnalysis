@@ -179,6 +179,8 @@ Full data audit across all four sources.
 - One P1 meter outage (Jan 29–31 2024, 36.8 h) confirmed by cross-source epoch alignment
 - SmartThings starts 7 months after P1 meter — common analysis window: Oct 2022 onward
 - 8 devices went offline before dataset end; documented with exact dates and likely causes
+- Blue room motion sensor gap: predecessor offline Jan 2023, replacement not installed until Jan 2024 — no single sensor covers the full window; occupancy analysis uses the 4 sensors that are continuously active
+- Garden air temperature sensor: 2 physically impossible readings (417 °C, 209 °C) from firmware error; excluded from any temperature regression
 - Weather (ERA5) complete and physically plausible; validated against in-situ garden sensor
 - Closes with a quality scorecard and justified analytical roadmap
 
@@ -190,8 +192,8 @@ Five-part decomposition over the 29-month aligned window (Oct 2022 – Mar 2025)
 1. **Baseline patterns** — electricity and gas time series; daily/weekly heatmaps reveal stable two-peak routine
 2. **Weather regression** — ERA5 validated against in-situ garden sensor (r=0.957, RMSE=2.2°C); HDD model explains **80.6%** of daily gas variance (slope: 0.55 m³/day per degree-day below 15.5°C); slope and intercept reported with both OLS and **HAC (Newey-West, maxlags=7) standard errors** — the estimate is robust to autocorrelation
 3. **Behavioural patterns** — motion sensor heatmaps and door-open profiles confirm weekday departure/return clusters (08:00–09:00 / 17:00–18:00); consistent with electricity consumption peaks
-4. **Occupancy detection** — K-means (K=6 by silhouette score) on 5-sensor hourly motion counts; low-activity cluster consumes **0.28 kWh/h** vs high-activity clusters at **0.67 kWh/h** (2.3× difference); **Kruskal-Wallis test confirms the gap is statistically significant across all six clusters (p < 0.001)**; DBSCAN confirms occupancy is a continuum rather than a binary switch
-4b. **Occupancy validation** — door contact sensor events used as independent weak labels to validate K-means clusters; low-activity cluster is 65% *away* hours, highest-activity cluster is 71% *home* hours; logistic regression on 5-sensor counts achieves AUC=0.645 (vs 0.5 random), confirming the motion signal generalises across time; non-monotonic relationship between activity level and occupancy confirms the continuum finding from DBSCAN
+4. **Occupancy detection** — K-means (K=6 by silhouette score) on 4-sensor hourly motion counts (Living Room, Bathroom, Kitchen ×2; Blue room excluded — no sensor covers the full window); low-activity cluster consumes **0.28 kWh/h** vs high-activity clusters at **0.67 kWh/h** (2.3× difference); **Kruskal-Wallis test confirms the gap is statistically significant across all six clusters (p < 0.001)**; DBSCAN confirms occupancy is a continuum rather than a binary switch
+4b. **Occupancy validation** — door contact sensor events used as independent weak labels to validate K-means clusters; low-activity cluster is 65% *away* hours, highest-activity cluster is 71% *home* hours; logistic regression on 4-sensor counts achieves AUC=0.645 (vs 0.5 random), confirming the motion signal generalises across time; non-monotonic relationship between activity level and occupancy confirms the continuum finding from DBSCAN
 5. **Synthesis** — variance decomposition: routine explains 15.4% of hourly electricity variance; adding occupancy state raises this to 23.3% (+7.9 pp); temperature adds a further 1.0 pp; 75.7% remains appliance-level noise not capturable at hourly resolution; sequential decomposition limitation acknowledged; Shapley-value decomposition noted as the order-independent alternative
 6. **Appendix: Causal inference** — Interrupted Time Series (Event Study) design using the Jan 2024 outage as a natural experiment; OLS with HDD confounder control; **pre-trend test implemented** (regress residuals on `days_since` in pre-period only; slope ≈ 0 validates the parallel-trends assumption, or flags seasonal confounding if significant); parallel-trends assumption and its limitations fully discussed
 7. **Business Implications** — three actionable recommendations derived directly from the findings: (1) automate heating against weather forecast, not habit — 80.6% of gas is already captured by HDD, manual adjustment adds nothing; (2) shift deferrable loads (EV, dishwasher) to quiet-occupancy windows identified by K-means — 2.3× gap is predictable, not random; (3) separate structural demand (HDD slope = building efficiency, responds to retrofit) from behavioural demand (occupancy multiplier, responds to TOU tariffs) for *Klimaatakkoord* policy design — these two levers are orthogonal and require different instruments
@@ -299,6 +301,8 @@ correct second-precision integers regardless of the underlying precision.
 - **P1 计量器断点**：2024 年 1 月 29–31 日，持续约 36.8 小时，经电力与燃气数据的 epoch 交叉比对确认为同一硬件故障
 - **数据源对齐问题**：SmartThings 数据比 P1 数据晚启动约 7 个月，跨源分析的公共起点为 2022 年 10 月
 - **设备生命周期**：8 台设备在数据集结束前已下线，均有明确日期记录和合理解释（如季节性圣诞树插座、被更换的锅炉）
+- **蓝屋运动传感器覆盖缺口**：前代设备 2023 年 1 月下线，替换设备 2024 年 1 月才安装——无单一传感器覆盖完整分析窗口；占用聚类改用持续在线的 4 个传感器
+- **花园气温传感器固件错误**：检测到 2 条物理非法读数（417°C / 209°C），已排除出气温回归分析
 - **气象数据**：ERA5 再分析数据完整无缺口，已与花园传感器实地比对验证（r=0.957，RMSE=2.2°C）
 
 ### `report_energy_analysis.ipynb` 综合能耗分析
@@ -310,8 +314,8 @@ correct second-precision integers regardless of the underlying precision.
 1. **基线模式**：电力与燃气时间序列，小时×星期热力图揭示稳定的双峰作息规律
 2. **天气回归**：供暖度日（HDD）模型解释每日燃气用量方差的 **80.6%**（斜率：15.5°C 以下每度日增加 0.55 m³/天）；OLS 残差经 Breusch-Pagan（异方差）和 Durbin-Watson（自相关）正式检验，并补充 **HAC（Newey-West，maxlags=7）稳健标准误**���比——斜率在更保守的自相关修正下依然显著；秋季残差偏低与建筑**热惯性**（夏季蓄热推迟供暖需求）一致
 3. **行为模式**：运动传感器与门磁事件分布，确认工作日出门（08:00–09:00）与回家（17:00–18:00）规律
-4. **在家状态检测**：5 个运动传感器的小时事件矩阵作为特征，K-means（K=6）聚类；低活跃簇用电 0.28 kWh/小时，高活跃簇达 0.67 kWh/小时（相差 2.3 倍）；**Kruskal-Wallis 检验确认六个簇间差异高度显著（p < 0.001）**；DBSCAN 验证在家/不在家是连续谱而非二值开关
-4b. **在家状态验证**：以门磁传感器事件构造独立弱标签（出门窗口 07:00–10:00，回家窗口 15:00–21:00，间隔 ≥ 3 小时），交叉验证 K-means 聚类结果；低活跃簇中 65% 为"不在家"小时，高活跃簇中 71% 为"在家"小时；以 5 个运动传感器小时事件数训练逻辑回归分类器，5 折有序交叉验证 AUC=0.645（随机基线 0.5），确认运动信号具有可泛化的在家状态预测能力；簇与在家比例的非单调关系进一步印证"连续谱"结论
+4. **在家状态检测**：4 个运动传感器（客厅、浴室、厨房 ×2；蓝屋传感器无法覆盖完整分析窗口，已排除）的小时事件矩阵作为特征，K-means（K=6）聚类；低活跃簇用电 0.28 kWh/小时，高活跃簇达 0.67 kWh/小时（相差 2.3 倍）；**Kruskal-Wallis 检验确认六个簇间差异高度显著（p < 0.001）**；DBSCAN 验证在家/不在家是连续谱而非二值开关
+4b. **在家状态验证**：以门磁传感器事件构造独立弱标签（出门窗口 07:00–10:00，回家窗口 15:00–21:00，间隔 ≥ 3 小时），交叉验证 K-means 聚类结果；低活跃簇中 65% 为"不在家"小时，高活跃簇中 71% 为"在家"小时；以 4 个运动传感器小时事件数训练逻辑回归分类器，5 折有序交叉验证 AUC=0.645（随机基线 0.5），确认运动信号具有可泛化的在家状态预测能力；簇与在家比例的非单调关系进一步印证"连续谱"结论
 5. **综合分解**：作息规律解释小时电力方差 15.4%；叠加在家状态后升至 23.3%（+7.9 pp）；温度再贡献 1.0 pp；剩余 75.7% 为家电级随机性；已说明顺序分解的方法论局限（Shapley 值分解为阶次无关替代方案）
 6. **附录：因果推断**：以 2024 年 1 月停电事件为自然实验，采用间断时间序列（事件研究）设计；OLS 控制 HDD 混淆变量；**实现 pre-trend 检验**；结果显示停电后用能显著下降，主要归因于季节性混淆，报告中诚实披露；附录同时示范了**政策评估方法论**：改造补贴是否真正降低了燃气用量，需要同样的事件研究设计来排除暖冬混淆
 7. **业务结论**：三条直接来自数据发现的可落地建议：(1) 将温控器与天气预报 API 联动——燃气 80.6% 由气温决定，手动调节不提供额外信息；(2) 将可延迟负荷（充电、洗碗机）排入 K-means 识别的低活跃时段——2.3 倍用电差距是可预测的规律，不是随机的；(3) 将**结构性需求**（HDD 斜率 = 建筑隔热效率，对应改造补贴政策）与**行为性需求**（在家状态倍数，对应峰谷电价激励）分开设计政策——两个杠杆正交，需要不同的政策工具
