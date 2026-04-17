@@ -23,6 +23,7 @@ Examples:
 
 import gzip
 import sys
+import warnings
 from pathlib import Path
 
 import click
@@ -72,17 +73,55 @@ def parse_p1g_file(filepath: str | Path) -> pd.DataFrame:
 
     df.dropna(subset=["time_str", "total"], inplace=True)
 
-    # Convert Amsterdam local time → UTC epoch (same pattern as p1e.py)
-    local_times = pd.to_datetime(df["time_str"], format="%Y-%m-%d %H:%M")
-    local_times = local_times.dt.tz_localize(
-        "Europe/Amsterdam", ambiguous="infer", nonexistent="shift_forward"
-    )
+    # Convert Amsterdam local time → UTC epoch (same pattern as p1e.py).
+    local_times_raw = pd.to_datetime(df["time_str"], format="%Y-%m-%d %H:%M")
+
+    try:
+        local_times = local_times_raw.dt.tz_localize(
+            "Europe/Amsterdam",
+            ambiguous="infer",
+            nonexistent="shift_forward",
+        )
+    except Exception:
+        local_times = local_times_raw.dt.tz_localize(
+            "Europe/Amsterdam",
+            ambiguous="NaT",
+            nonexistent="shift_forward",
+        )
+
+    nat_mask = local_times.isna()
+    if nat_mask.any():
+        n_nat = nat_mask.sum()
+        warnings.warn(
+            f"{filepath.name}: {n_nat} DST-ambiguous timestamp(s) could not be "
+            f"inferred and will be dropped. "
+            f"Affected: {df.loc[nat_mask, 'time_str'].tolist()[:5]}",
+            UserWarning,
+            stacklevel=2,
+        )
+        df = df[~nat_mask].copy()
+        local_times = local_times[~nat_mask]
+
     df["epoch"] = (
         local_times.dt.tz_convert("UTC")
         .dt.tz_localize(None)
         .astype("datetime64[s]")
         .astype("int64")
     )
+
+    # Physical sanity check: cumulative gas counter is always non-negative.
+    df["total"] = pd.to_numeric(df["total"], errors="coerce")
+    df.dropna(subset=["total"], inplace=True)
+
+    invalid_mask = df["total"] < 0
+    if invalid_mask.any():
+        warnings.warn(
+            f"{filepath.name}: {invalid_mask.sum()} row(s) with negative gas "
+            f"readings removed.",
+            UserWarning,
+            stacklevel=2,
+        )
+        df = df[~invalid_mask].copy()
 
     df.drop_duplicates(subset=["epoch"], keep="first", inplace=True)
 

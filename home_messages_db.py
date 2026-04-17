@@ -424,14 +424,14 @@ class HomeMessagesDB:
         n_cols = len(records[0])
         batch_size = max(1, 999 // n_cols)
 
-        before = self._count(model)
+        total_inserted = 0
         with self._engine.begin() as conn:
             for i in range(0, len(records), batch_size):
                 batch = records[i : i + batch_size]
                 stmt = sqlite_insert(model).prefix_with("OR IGNORE").values(batch)
-                conn.execute(stmt)
-        after = self._count(model)
-        return after - before
+                result = conn.execute(stmt)
+                total_inserted += result.rowcount  # ignored rows are not counted
+        return total_inserted
 
     def _count(self, model) -> int:
         """Return the current row count for a model's table."""

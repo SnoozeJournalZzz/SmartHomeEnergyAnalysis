@@ -81,12 +81,12 @@ def fetch_weather(start_date: str, end_date: str) -> pd.DataFrame:
     Notes
     -----
     **Timezone handling:**
-    Open-Meteo returns times as Amsterdam local strings (e.g.
-    ``'2022-12-01T00:00'``) with no UTC offset marker.  We use
-    ``tz_localize`` to attach the correct timezone and then convert to UTC.
-    The ``ambiguous='infer'`` option handles the DST fall-back overlap
-    (when the clock goes back one hour), and ``nonexistent='shift_forward'``
-    handles the spring-forward gap.
+    We request ``timezone="UTC"`` from the Open-Meteo API, so the returned
+    time strings are already in UTC (e.g. ``'2022-12-01T00:00'``, no offset
+    suffix).  ``pd.to_datetime(..., utc=True)`` attaches the UTC timezone to
+    these naive-UTC strings directly — no ``tz_localize`` step is needed.
+    DST handling is irrelevant here because we never work with Amsterdam local
+    time in this function.
     """
     # Validate date order before making a network call
     if start_date > end_date:
@@ -116,7 +116,7 @@ def fetch_weather(start_date: str, end_date: str) -> pd.DataFrame:
         raise ValueError(f"Open-Meteo API error: {data['error']}")
 
     hourly = data["hourly"]
-    times       = hourly["time"]                  # Amsterdam local, no tz suffix
+    times       = hourly["time"]                  # UTC, no tz suffix
     temperatures = hourly["temperature_2m"]        # float or None
     humidities   = hourly["relative_humidity_2m"]  # int or None
 

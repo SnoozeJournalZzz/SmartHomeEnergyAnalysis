@@ -23,6 +23,7 @@ Examples:
 
 import gzip
 import sys
+import warnings
 from pathlib import Path
 
 import click
@@ -100,17 +101,48 @@ def parse_p1e_file(filepath: str | Path) -> pd.DataFrame:
     # NOTE: pd.to_datetime is used first for vectorised parsing (much faster
     # than calling amsterdam_str_to_epoch row-by-row).
 
-    local_times = pd.to_datetime(df["time_str"], format="%Y-%m-%d %H:%M")
+    local_times_raw = pd.to_datetime(df["time_str"], format="%Y-%m-%d %H:%M")
 
-    # tz_localize: tell pandas these times are Amsterdam local times
-    # ambiguous='infer': handle the DST overlap (clocks go back) automatically
-    # nonexistent='shift_forward': handle the DST gap (clocks go forward)
-    local_times = local_times.dt.tz_localize(
-        "Europe/Amsterdam", ambiguous="infer", nonexistent="shift_forward"
-    )
+    # tz_localize: tell pandas these times are Amsterdam local times.
+    # First attempt: 'infer' resolves the DST fall-back overlap by checking
+    # that the sequence is monotonically increasing.  This works for normal
+    # month-spanning files that include full context around the transition.
+    # nonexistent='shift_forward': handle the spring-forward gap (02:00–03:00
+    # skipped) by moving the non-existent time to the next valid instant.
+    try:
+        local_times = local_times_raw.dt.tz_localize(
+            "Europe/Amsterdam",
+            ambiguous="infer",
+            nonexistent="shift_forward",
+        )
+    except Exception:
+        # 'infer' failed entirely — most likely because the file starts inside
+        # the ambiguous DST window (02:00–03:00 on fall-back day) so pandas
+        # has no prior-row context to determine CET vs CEST.
+        # Fall back to NaT for every ambiguous timestamp; we handle them below.
+        local_times = local_times_raw.dt.tz_localize(
+            "Europe/Amsterdam",
+            ambiguous="NaT",
+            nonexistent="shift_forward",
+        )
 
-    # tz_convert: shift to UTC, then extract integer seconds
-    # Convert to UTC, strip tz info, then cast to second-precision int.
+    # Detect NaT rows produced by the NaT fallback path and drop them with a
+    # warning.  Silently accepting a wrong epoch (off by 3600 s) is worse than
+    # dropping a handful of ambiguous readings.
+    nat_mask = local_times.isna()
+    if nat_mask.any():
+        n_nat = nat_mask.sum()
+        warnings.warn(
+            f"{filepath.name}: {n_nat} DST-ambiguous timestamp(s) could not be "
+            f"inferred and will be dropped. "
+            f"Affected: {df.loc[nat_mask, 'time_str'].tolist()[:5]}",
+            UserWarning,
+            stacklevel=2,
+        )
+        df = df[~nat_mask].copy()
+        local_times = local_times[~nat_mask]
+
+    # tz_convert: shift to UTC, then extract integer seconds.
     # The tz_localize(None) step is required before astype("datetime64[s]")
     # in pandas 3.0, which forbids direct casting from tz-aware to naive.
     # This approach is robust across pandas 2.x and 3.x.
@@ -120,6 +152,23 @@ def parse_p1e_file(filepath: str | Path) -> pd.DataFrame:
         .astype("datetime64[s]")
         .astype("int64")
     )
+
+    # --- Physical sanity checks on meter readings ---------------------------
+    # Coerce non-numeric strings to NaN (e.g. garbled CSV rows), then drop.
+    df["t1"] = pd.to_numeric(df["t1"], errors="coerce")
+    df["t2"] = pd.to_numeric(df["t2"], errors="coerce")
+    df.dropna(subset=["t1", "t2"], inplace=True)
+
+    # Cumulative meter counters are always non-negative.
+    invalid_mask = (df["t1"] < 0) | (df["t2"] < 0)
+    if invalid_mask.any():
+        warnings.warn(
+            f"{filepath.name}: {invalid_mask.sum()} row(s) with negative meter "
+            f"readings removed.",
+            UserWarning,
+            stacklevel=2,
+        )
+        df = df[~invalid_mask].copy()
 
     # --- Drop duplicate timestamps within this file -------------------------
     # P1e files overlap in time (same reading can appear in multiple files).
