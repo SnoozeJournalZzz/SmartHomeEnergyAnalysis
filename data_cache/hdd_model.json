@@ -5,6 +5,6 @@
   "rmse": 1.2562272486572097,
   "n_days": 907,
   "hdd_base": 15.5,
-  "computed_at": "2026-04-12",
+  "computed_at": "2026-04-17",
   "source": "export_dashboard_data.py \u2014 statsmodels smf.ols"
 }

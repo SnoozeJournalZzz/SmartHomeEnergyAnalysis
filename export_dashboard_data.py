@@ -32,14 +32,14 @@ EPOCH_END    = 1743375600   # 2025-03-31 Amsterdam
 # 15.5°C is the Dutch national standard for heating degree-day calculations
 # (NEN-EN-ISO 15927-6, adopted by KNMI and CBS for energy performance reporting).
 HDD_BASE     = 15.5
-K            = 6
+K            = 5
 # Require ≥80 of 96 possible 15-min readings per day (83% completeness).
 # A day with a 16+ hour gap would fall below this threshold and become NaN.
 # This ensures days with the Jan 2024 P1 outage are excluded automatically.
 MIN_DAILY_READINGS = 80
 MOTION_DEVICES = [
     'Living Room (move)', 'Bathroom (sensor eye)',
-    'Kitchen (stairs)', 'Kitchen (move)', 'Blue room (move aeotec)',
+    'Kitchen (stairs)', 'Kitchen (move)',
 ]
 
 Path('data_cache').mkdir(exist_ok=True)
@@ -188,11 +188,10 @@ sensor_counts = (
     .unstack('name', fill_value=0)
 )
 col_map = {
-    'Bathroom (sensor eye)' : 'bathroom',
-    'Blue room (move aeotec)': 'blue_room',
-    'Kitchen (move)'         : 'kitchen',
-    'Kitchen (stairs)'       : 'stairs',
-    'Living Room (move)'     : 'living_room',
+    'Bathroom (sensor eye)': 'bathroom',
+    'Kitchen (move)'        : 'kitchen',
+    'Kitchen (stairs)'      : 'stairs',
+    'Living Room (move)'    : 'living_room',
 }
 sensor_counts = sensor_counts.rename(columns=col_map)
 sensor_counts['total'] = sensor_counts.sum(axis=1)
@@ -204,7 +203,7 @@ full_index = pd.date_range(
 )
 sensor_counts = sensor_counts.reindex(full_index, fill_value=0)
 
-features  = ['bathroom', 'blue_room', 'kitchen', 'stairs', 'living_room']
+features  = ['bathroom', 'kitchen', 'stairs', 'living_room']
 X         = sensor_counts[features].values
 X_scaled  = StandardScaler().fit_transform(X)
 

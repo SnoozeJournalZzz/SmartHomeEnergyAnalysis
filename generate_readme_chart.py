@@ -162,7 +162,7 @@ fig.text(
 )
 fig.text(
     0.74, -0.04,
-    'Each row = one K-means cluster (K=6, silhouette-optimised).  '
+    'Each row = one K-means cluster (K=5, silhouette-optimised).  '
     'Bars show cluster-mean electricity.',
     ha='center', fontsize=9, color='#666666',
 )
