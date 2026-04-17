@@ -19,8 +19,8 @@ The analysis works through the problem in layers:
 |----------|---------|-------------|
 | What drives gas consumption? | HDD regression explains **80.6%** of daily gas variance; every degree-day below 15.5 °C adds **0.55 m³/day** | Baseline heating demand is predictable from weather alone — deviations signal equipment faults or behaviour change. Residuals show a slight autumn underestimate consistent with **thermal lag**: buildings retain summer warmth, delaying heating demand beyond what daily HDD captures. |
 | Does occupancy matter for electricity? | The quietest cluster (53% of hours, 3 motion events/h) uses **0.29 kWh/h**; the busiest (23 events/h) uses **0.65 kWh/h** — a **2.2× gap** | Occupancy scheduling, not appliance replacement, is the primary lever for demand-side management |
-| Can we forecast tomorrow's consumption? | Three models tested (naive, linear, LightGBM). For gas, **linear regression outperforms LightGBM** (MAE 0.70 vs 0.72 m³) — a near-linear physics process needs no tree complexity. For electricity, a **7-day motion rolling average adds consistent predictive value** beyond calendar features (ablation-confirmed); raw daily motion counts do not. | Model complexity should match signal complexity. Occupancy rhythm — not daily fluctuation — is the behavioural signal that generalises. |
-| What is that worth? | Gas model reduces MAE by **0.19 m³/day (−21%)**, electricity by **0.16 kWh/day (−7%)**. At 2024 Dutch tariffs this represents an **upper-bound value of ~€70/household/year** — the savings ceiling if a smart thermostat could fully act on every percentage-point improvement in forecast accuracy. Realised savings depend on system integration and are typically 30–50% of this ceiling. | N=1; gas improvement scales to all 8M Dutch smart-meter households (weather + meter data only); electricity + occupancy requires in-home sensors (~15% penetration today) |
+| Can we forecast tomorrow's consumption? | Three models tested (naive, linear, LightGBM). For gas, **linear regression outperforms LightGBM** (MAE 0.68 vs 0.71 m³) — a near-linear physics process needs no tree complexity. For electricity, a 7-day motion rolling average adds a **marginal improvement** (+0.8%) beyond calendar features; lag and calendar features already capture most of the occupancy rhythm, leaving little incremental signal. | Model complexity should match signal complexity. Consumption lags and calendar features approximate occupancy rhythm well enough that sensor data adds little at this prediction horizon. |
+| What is that worth? | Gas model reduces MAE by **0.20 m³/day (−22%)**, electricity by **0.16 kWh/day (−7%)**. At 2024 Dutch tariffs this represents an **upper-bound value of ~€70/household/year** — the savings ceiling if a smart thermostat could fully act on every percentage-point improvement in forecast accuracy. Realised savings depend on system integration and are typically 30–50% of this ceiling. | N=1; gas improvement scales to all 8M Dutch smart-meter households (weather + meter data only); electricity + occupancy requires in-home sensors (~15% penetration today) |
 
 Three Jupyter reports and a live dashboard document every step — from raw files to policy-ready conclusions.
 
@@ -205,14 +205,14 @@ Chronological train/test split: 25 months training (Oct 2022 – Oct 2024), 5-mo
 
 | Model | Gas MAE | Electricity MAE |
 |---|---|---|
-| Naive (yesterday's value) | 0.894 m³ | 2.236 kWh |
-| Linear regression | **0.702 m³** | 2.190 kWh |
-| LightGBM (tuned via TSCV) | 0.723 m³ | 2.073 kWh |
+| Naive (yesterday's value) | 0.874 m³ | 2.201 kWh |
+| Linear regression | **0.678 m³** | 2.138 kWh |
+| LightGBM (tuned via TSCV) | 0.713 m³ | 2.061 kWh |
 
 Key findings:
 - **Gas**: linear regression slightly outperforms LightGBM — the temperature–gas relationship is near-linear (as established by the HDD model), so additional model complexity provides no structural advantage
-- **Electricity**: LightGBM with occupancy feature (`motion_roll7`, 7-day rolling mean of motion events) reduces MAE by 3.7% vs the no-occupancy baseline, confirming the predictive value of the Part 4 occupancy analysis
-- **Feature form matters**: raw daily motion count (`motion_lag1`) *worsened* predictions; the weekly rolling mean captured the occupancy *rhythm* rather than day-level noise — consistent with Part 4's finding that occupancy operates at the weekly behavioural level
+- **Electricity**: LightGBM with occupancy feature (`motion_roll7`, 7-day rolling mean of motion events) reduces MAE by 0.8% vs the no-occupancy baseline — a marginal gain. `elec_lag1`, `elec_roll7`, and calendar features already capture most of the routine-driven consumption rhythm, leaving little incremental signal for `motion_roll7`
+- **Feature form matters**: raw daily motion count (`motion_lag1`) *worsened* predictions; the weekly rolling mean is the right aggregation, but the gain over a well-specified lag model is small
 - **Time-series CV is not optional**: TSCV with expanding window selected n_estimators=50; using n_estimators=300 (the naive default) produced a model worse than the naive baseline
 - **Residual analysis**: gas residuals show no day-of-week pattern (confirming the boiler responds to temperature, not routine); electricity residuals reveal systematic Saturday over-prediction, evidence of behavioural drift not captured by calendar features
 - **Business impact**: the MAE improvements (gas −0.19 m³/day, electricity −0.16 kWh/day) represent an upper-bound value of ~€70/household/year at 2024 Dutch tariffs — the savings ceiling if a smart thermostat acted perfectly on every forecast improvement. Realised savings are typically 30–50% of this ceiling. Gas improvement scales to all 8M Dutch smart-metered households; electricity + occupancy requires in-home sensors (~15% penetration)
@@ -328,17 +328,17 @@ correct second-precision integers regardless of the underlying precision.
 
 | 模型 | 燃气 MAE | 用电 MAE |
 |---|---|---|
-| Naive（昨天的值） | 0.894 m³ | 2.236 kWh |
-| 线性回归 | **0.702 m³** | 2.190 kWh |
-| LightGBM（TSCV 调参） | 0.723 m³ | 2.073 kWh |
+| Naive（昨天的值） | 0.874 m³ | 2.201 kWh |
+| 线性回归 | **0.678 m³** | 2.138 kWh |
+| LightGBM（TSCV 调参） | 0.713 m³ | 2.061 kWh |
 
 核心发现：
 - **燃气**：线性回归略优于 LightGBM——温度与燃气的关系接近线性，复杂模型没有结构优势
-- **用电**：加入在家状态特征（过去 7 日运动事件滚动均值）后，LightGBM 的 MAE 比无占用特征基线降低 3.7%，验证了第 4 部分占用状态分析的预测价值
-- **特征形式与特征选择同等重要**：原始日运动量（lag1）反而使预测变差；7 日滚动均值捕捉的是行为节律而非单日噪声
+- **用电**：加入在家状态特征（过去 7 日运动事件滚动均值）后，LightGBM 的 MAE 比无占用特征基线降低 0.8%——改善幅度较小。`elec_lag1`、`elec_roll7` 和日历特征已捕捉了大部分行为节律，`motion_roll7` 的增量信息有限
+- **特征形式与特征选择同等重要**：原始日运动量（lag1）反而使预测变差；7 日滚动均值是正确的聚合方式，但在已含消费滞后项的模型中增益有限
 - **时序交叉验证不可省略**：TSCV（扩展窗口）选出 n_estimators=50；若用默认的 300 棵树，预测效果差于 Naive 基线
 - **残差分析**：燃气残差无星期规律（锅炉响应物理而非日历）；用电残差揭示周六系统性高估，是行为漂移未被日历特征捕捉的证据
-- **商业价值**：MAE 改善（燃气 −0.19 m³/天，用电 −0.16 kWh/天）折算为每户每年约 **€70 的预测精度价值上限**——��若智能温控系统能完全响应预测改善所能节省的理论天花板。实际节省通常为上限的 30–50%。燃气改善可推广至荷兰全部 800 万智能电表用户（仅需电表 + 气象数据）；用电 + 在家状态改善需要室内传感器（目前普及率约 15%）
+- **商业价值**：MAE 改善（燃气 −0.20 m³/天，用电 −0.16 kWh/天）折算为每户每年约 **€70 的预测精度价值上限**——��若智能温控系统能完全响应预测改善所能节省的理论天花板。实际节省通常为上限的 30–50%。燃气改善可推广至荷兰全部 800 万智能电表用户（仅需电表 + 气象数据）；用电 + 在家状态改善需要室内传感器（目前普及率约 15%）
 
 ---
 
