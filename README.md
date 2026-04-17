@@ -1,6 +1,6 @@
 # SmartHomeEnergyAnalysis
 
-**32 months of real smart home data from a single-family house in Nordwijk, NL —
+**36 months of P1 meter data and a 29-month aligned analysis window from a single-family house in Nordwijk, NL —
 built into a full analytical pipeline from raw files to insight.**
 
 Developed in collaboration with **Statistics Netherlands (CBS)**.
@@ -9,7 +9,7 @@ Developed in collaboration with **Statistics Netherlands (CBS)**.
 
 ## Executive Summary
 
-Dutch households spend roughly **€2,400/year on energy** (2024 tariffs). Smart meters are near-universal, yet the data they generate is rarely used to understand *why* consumption varies day to day. CBS tasked this project with answering that question using 32 months of real metering data from a single home in Nordwijk — a dataset that includes electricity, gas, weather, and 40 IoT sensors simultaneously.
+Dutch households spend roughly **€2,400/year on energy** (2024 tariffs). Smart meters are near-universal, yet the data they generate is rarely used to understand *why* consumption varies day to day. CBS tasked this project with answering that question using real metering data from a single home in Nordwijk — P1 electricity and gas records spanning 36 months (Mar 2022 – Mar 2025), with a 29-month aligned analysis window (Oct 2022 – Mar 2025) when all four sources (electricity, gas, weather, and 40 IoT sensors) were simultaneously active.
 
 ![What drives this household's energy consumption?](docs/readme_chart.png)
 
@@ -258,7 +258,7 @@ correct second-precision integers regardless of the underlying precision.
 
 ## 项目简介
 
-本项目基于荷兰 Nordwijk 一户真实家庭的智能家居数据，数据跨度 32 个月（2022 年 3 月至 2025 年 3 月），由荷兰统计局（CBS）提供。
+本项目基于荷兰 Nordwijk 一户真实家庭的智能家居数据，由荷兰统计局（CBS）提供。P1 电表（电力 + 燃气）数据跨度 **36 个月**（2022 年 3 月至 2025 年 3 月）；四个数据源同时在线的对齐分析窗口为 **29 个月**（2022 年 10 月至 2025 年 3 月，SmartThings 传感器数据从 2022 年 10 月起有效）。
 
 数据来源包括：P1 智能电表（电力 + 燃气，15 分钟分辨率）、约 40 个 SmartThings 智能家居设备（运动传感器、温度传感器、门磁、智能插座等），以及 Open-Meteo 提供的历史气象数据。
 
